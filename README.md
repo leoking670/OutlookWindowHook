@@ -39,7 +39,7 @@ OlkWindowHook.exe --help       # Print usage
 
 1. Watches for supported top-level Outlook main windows created by `olk.exe` or `outlook.exe`
 2. Installs a `WH_CALLWNDPROC` hook only on the Outlook window thread
-3. Intercepts the tracked window's `WM_CLOSE` event and instead calls `ShowWindow(hwnd, SW_HIDE)`
+3. Intercepts the tracked window's `WM_CLOSE` event and hides new Outlook or minimizes classic Outlook
 4. Optionally registers a global hotkey to show or hide the tracked Outlook main window
 
 ## Building

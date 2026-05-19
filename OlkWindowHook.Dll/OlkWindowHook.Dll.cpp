@@ -28,6 +28,8 @@
 #pragma comment(lib, "Comctl32.lib")
 
 constexpr wchar_t TARGET_WINDOW_PROP[] = L"OlkWindowHook.TargetWindow";
+const HANDLE TARGET_ACTION_HIDE = reinterpret_cast<HANDLE>(1);
+const HANDLE TARGET_ACTION_MINIMIZE = reinterpret_cast<HANDLE>(2);
 constexpr wchar_t CLEANUP_MESSAGE_NAME[] = L"OlkWindowHook.CleanupSubclass";
 
 HINSTANCE hInstance;
@@ -49,6 +51,15 @@ BOOL IsTargetWindow(HWND hwnd) {
     return GetProp(hwnd, TARGET_WINDOW_PROP) != NULL;
 }
 
+void HideOrMinimizeTargetWindow(HWND hwnd) {
+    if (GetProp(hwnd, TARGET_WINDOW_PROP) == TARGET_ACTION_MINIMIZE) {
+        ShowWindow(hwnd, SW_MINIMIZE);
+    }
+    else {
+        ShowWindow(hwnd, SW_HIDE);
+    }
+}
+
 void RemoveSubclass(HWND hwnd) {
     RemoveWindowSubclass(hwnd, SubclassProc, 1);
     RemoveProp(hwnd, TARGET_WINDOW_PROP);
@@ -66,7 +77,7 @@ LRESULT CALLBACK SubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam
     }
 
     if (uMsg == WM_CLOSE && IsTargetWindow(hwnd)) {
-        ShowWindow(hwnd, SW_HIDE);
+        HideOrMinimizeTargetWindow(hwnd);
         return 0;
     }
 
@@ -95,7 +106,7 @@ LRESULT CALLBACK CallWndProc(int nCode, WPARAM wParam, LPARAM lParam) {
         }
         else if (pCwp->message == WM_CLOSE && IsTargetWindow(pCwp->hwnd)) {
             EnsureSubclass(pCwp->hwnd);
-            ShowWindow(pCwp->hwnd, SW_HIDE);
+            HideOrMinimizeTargetWindow(pCwp->hwnd);
             return 0;
         }
     }

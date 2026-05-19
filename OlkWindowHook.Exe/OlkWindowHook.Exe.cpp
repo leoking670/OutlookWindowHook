@@ -42,6 +42,8 @@ constexpr wchar_t NEW_OUTLOOK_PROCESS_NAME[] = L"olk.exe";
 constexpr wchar_t CLASSIC_OUTLOOK_PROCESS_NAME[] = L"outlook.exe";
 constexpr wchar_t CLASSIC_OUTLOOK_MAIN_WINDOW_CLASS[] = L"rctrl_renwnd32";
 constexpr wchar_t TARGET_WINDOW_PROP[] = L"OlkWindowHook.TargetWindow";
+const HANDLE TARGET_ACTION_HIDE = reinterpret_cast<HANDLE>(1);
+const HANDLE TARGET_ACTION_MINIMIZE = reinterpret_cast<HANDLE>(2);
 constexpr wchar_t CLEANUP_MESSAGE_NAME[] = L"OlkWindowHook.CleanupSubclass";
 constexpr wchar_t CONTROL_MESSAGE_NAME[] = L"OlkWindowHook.Control";
 constexpr wchar_t WINDOW_CLASS_NAME[] = L"OlkWindowHookClass";
@@ -527,6 +529,25 @@ bool IsTargetOutlookWindow(HWND window) {
     return _wcsicmp(GetWindowClass(window).c_str(), CLASSIC_OUTLOOK_MAIN_WINDOW_CLASS) == 0;
 }
 
+bool IsClassicOutlookWindow(HWND window) {
+    DWORD processId = 0;
+    GetWindowThreadProcessId(window, &processId);
+    if (!processId) {
+        return false;
+    }
+
+    return _wcsicmp(GetProcessName(processId).c_str(), CLASSIC_OUTLOOK_PROCESS_NAME) == 0;
+}
+
+void HideOrMinimizeOutlookWindow(HWND window) {
+    if (IsClassicOutlookWindow(window)) {
+        ShowWindow(window, SW_MINIMIZE);
+    }
+    else {
+        ShowWindow(window, SW_HIDE);
+    }
+}
+
 bool TrackOutlookWindow(HWND window, bool allowInitialHide) {
     if (!SetHookForThread || !IsTargetOutlookWindow(window)) {
         return false;
@@ -540,7 +561,8 @@ bool TrackOutlookWindow(HWND window, bool allowInitialHide) {
         return true;
     }
 
-    if (!SetProp(window, TARGET_WINDOW_PROP, reinterpret_cast<HANDLE>(1))) {
+    HANDLE closeAction = IsClassicOutlookWindow(window) ? TARGET_ACTION_MINIMIZE : TARGET_ACTION_HIDE;
+    if (!SetProp(window, TARGET_WINDOW_PROP, closeAction)) {
         return false;
     }
 
@@ -577,7 +599,7 @@ bool TrackOutlookWindow(HWND window, bool allowInitialHide) {
     trackedThreadByWindow[window] = threadId;
 
     if (hideOnFirstOpen && allowInitialHide) {
-        ShowWindow(window, SW_HIDE);
+        HideOrMinimizeOutlookWindow(window);
         hideOnFirstOpen = false;
     }
 
@@ -603,7 +625,7 @@ void ToggleOutlookWindow() {
     }
 
     if (IsWindowVisible(outlookWindow) && !IsIconic(outlookWindow)) {
-        ShowWindow(outlookWindow, SW_HIDE);
+        HideOrMinimizeOutlookWindow(outlookWindow);
     }
     else {
         ShowWindow(outlookWindow, SW_RESTORE);

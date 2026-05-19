@@ -21,6 +21,7 @@
 
 #include <windows.h>
 #include <tchar.h>
+#include <cwctype>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -37,13 +38,16 @@
 
 constexpr wchar_t APP_NAME[] = L"Outlook Window Hook";
 constexpr wchar_t GITHUB_URL[] = L"https://github.com/leoking670/OutlookWindowHook";
-constexpr wchar_t TARGET_PROCESS_NAME[] = L"olk.exe";
+constexpr wchar_t NEW_OUTLOOK_PROCESS_NAME[] = L"olk.exe";
+constexpr wchar_t CLASSIC_OUTLOOK_PROCESS_NAME[] = L"outlook.exe";
+constexpr wchar_t CLASSIC_OUTLOOK_MAIN_WINDOW_CLASS[] = L"rctrl_renwnd32";
 constexpr wchar_t TARGET_WINDOW_PROP[] = L"OlkWindowHook.TargetWindow";
 constexpr wchar_t CLEANUP_MESSAGE_NAME[] = L"OlkWindowHook.CleanupSubclass";
 constexpr wchar_t CONTROL_MESSAGE_NAME[] = L"OlkWindowHook.Control";
 constexpr wchar_t WINDOW_CLASS_NAME[] = L"OlkWindowHookClass";
 constexpr wchar_t MUTEX_NAME[] = L"OlkWindowHook";
-constexpr wchar_t APP_VERSION[] = L"1.1.0";
+constexpr wchar_t APP_VERSION[] = L"1.2.0";
+constexpr int HOTKEY_ID = 1;
 
 typedef BOOL(*SET_HOOK_FOR_THREAD_PROC)(DWORD);
 typedef void(*REMOVE_HOOK_FOR_THREAD_PROC)(DWORD);
@@ -59,9 +63,15 @@ enum class OneShotCommand {
 
 struct CommandOptions {
     bool trayEnabled = true;
+    bool hideOnFirstOpen = false;
+    bool hotkeyEnabled = false;
+    UINT hotkeyModifiers = 0;
+    UINT hotkeyVirtualKey = 0;
+    std::wstring hotkeyText;
     OneShotCommand command = OneShotCommand::None;
     int parseExitCode = 0;
     std::wstring invalidArg;
+    std::wstring parseError;
 };
 
 HINSTANCE hInst;
@@ -82,6 +92,16 @@ UINT cleanupMessage = 0;
 UINT controlMessage = 0;
 bool trayEnabled = true;
 bool trayIconAdded = false;
+bool hideOnFirstOpen = false;
+bool hotkeyRegistered = false;
+UINT hotkeyModifiers = 0;
+UINT hotkeyVirtualKey = 0;
+std::wstring hotkeyText;
+
+BOOL CALLBACK EnumWindowsProc(HWND window, LPARAM lParam);
+void ToggleOutlookWindow();
+bool RegisterToggleHotkey(HWND window);
+void UnregisterToggleHotkey(HWND window);
 
 void PrintLine(const wchar_t* message) {
     wprintf(L"%s\n", message);
@@ -93,6 +113,10 @@ void PrintHelp() {
     PrintLine(L"Usage:");
     PrintLine(L"  OlkWindowHook.exe              Start with tray icon");
     PrintLine(L"  OlkWindowHook.exe --no-tray    Start in background without tray icon");
+    PrintLine(L"  OlkWindowHook.exe --hotkey Ctrl+Alt+O");
+    PrintLine(L"                                 Toggle the Outlook main window");
+    PrintLine(L"  OlkWindowHook.exe --hide-on-first-open");
+    PrintLine(L"                                 Hide the first Outlook main window opened after startup");
     PrintLine(L"  OlkWindowHook.exe --status     Show whether the app is running");
     PrintLine(L"  OlkWindowHook.exe --exit       Stop the running instance");
     PrintLine(L"  OlkWindowHook.exe --version    Show version");
@@ -113,6 +137,68 @@ bool SetOneShotCommand(CommandOptions& options, OneShotCommand command) {
     return true;
 }
 
+std::wstring ToLower(const std::wstring& value) {
+    std::wstring lower = value;
+    for (wchar_t& ch : lower) {
+        ch = static_cast<wchar_t>(towlower(ch));
+    }
+    return lower;
+}
+
+bool ParseHotkey(const std::wstring& text, UINT& modifiers, UINT& virtualKey) {
+    modifiers = 0;
+    virtualKey = 0;
+
+    size_t start = 0;
+    while (start <= text.length()) {
+        size_t end = text.find(L'+', start);
+        std::wstring token = text.substr(start, end == std::wstring::npos ? std::wstring::npos : end - start);
+        token = ToLower(token);
+
+        if (token.empty()) {
+            return false;
+        }
+        else if (token == L"ctrl" || token == L"control") {
+            modifiers |= MOD_CONTROL;
+        }
+        else if (token == L"alt") {
+            modifiers |= MOD_ALT;
+        }
+        else if (token == L"shift") {
+            modifiers |= MOD_SHIFT;
+        }
+        else if (token == L"win" || token == L"windows") {
+            modifiers |= MOD_WIN;
+        }
+        else if (virtualKey == 0 && token.length() == 1 && token[0] >= L'a' && token[0] <= L'z') {
+            virtualKey = static_cast<UINT>(towupper(token[0]));
+        }
+        else if (virtualKey == 0 && token.length() == 1 && token[0] >= L'0' && token[0] <= L'9') {
+            virtualKey = static_cast<UINT>(token[0]);
+        }
+        else if (virtualKey == 0 && token[0] == L'f') {
+            wchar_t* endPtr = NULL;
+            long functionKey = wcstol(token.c_str() + 1, &endPtr, 10);
+            if (endPtr && *endPtr == L'\0' && functionKey >= 1 && functionKey <= 24) {
+                virtualKey = VK_F1 + static_cast<UINT>(functionKey) - 1;
+            }
+            else {
+                return false;
+            }
+        }
+        else {
+            return false;
+        }
+
+        if (end == std::wstring::npos) {
+            break;
+        }
+        start = end + 1;
+    }
+
+    return modifiers != 0 && virtualKey != 0;
+}
+
 CommandOptions ParseCommandLine(int argc, wchar_t* argv[]) {
     CommandOptions options;
 
@@ -120,6 +206,35 @@ CommandOptions ParseCommandLine(int argc, wchar_t* argv[]) {
         std::wstring arg = argv[i];
         if (IsArg(arg, L"--no-tray")) {
             options.trayEnabled = false;
+        }
+        else if (IsArg(arg, L"--hide-on-first-open")) {
+            options.hideOnFirstOpen = true;
+        }
+        else if (IsArg(arg, L"--hotkey")) {
+            if (i + 1 >= argc) {
+                options.parseError = L"--hotkey requires a key combination.";
+                options.parseExitCode = 2;
+                continue;
+            }
+
+            std::wstring hotkeyArg = argv[++i];
+            if (!ParseHotkey(hotkeyArg, options.hotkeyModifiers, options.hotkeyVirtualKey)) {
+                options.parseError = L"Invalid hotkey. Use modifiers plus one key, for example Ctrl+Alt+O.";
+                options.parseExitCode = 2;
+                continue;
+            }
+            options.hotkeyEnabled = true;
+            options.hotkeyText = hotkeyArg;
+        }
+        else if (arg.rfind(L"--hotkey=", 0) == 0) {
+            std::wstring hotkeyArg = arg.substr(9);
+            if (!ParseHotkey(hotkeyArg, options.hotkeyModifiers, options.hotkeyVirtualKey)) {
+                options.parseError = L"Invalid hotkey. Use modifiers plus one key, for example Ctrl+Alt+O.";
+                options.parseExitCode = 2;
+                continue;
+            }
+            options.hotkeyEnabled = true;
+            options.hotkeyText = hotkeyArg;
         }
         else if (IsArg(arg, L"--status")) {
             SetOneShotCommand(options, OneShotCommand::Status);
@@ -173,6 +288,9 @@ int RunOneShotCommand(const CommandOptions& options) {
     if (options.parseExitCode != 0) {
         if (!options.invalidArg.empty()) {
             fwprintf(stderr, L"Unknown option: %s\n\n", options.invalidArg.c_str());
+        }
+        else if (!options.parseError.empty()) {
+            fwprintf(stderr, L"%s\n\n", options.parseError.c_str());
         }
         else {
             fwprintf(stderr, L"Only one command option can be used at a time.\n\n");
@@ -285,6 +403,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
     switch (uMsg) {
     case WM_CREATE:
         AddTrayIcon(hwnd);
+        RegisterToggleHotkey(hwnd);
+        break;
+    case WM_HOTKEY:
+        if (wParam == HOTKEY_ID) {
+            ToggleOutlookWindow();
+        }
         break;
     case WM_SYSICON:
         if (lParam == WM_RBUTTONUP) {
@@ -325,6 +449,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         }
         break;
     case WM_DESTROY:
+        UnregisterToggleHotkey(hwnd);
         RemoveTrayIcon();
         PostQuitMessage(0);
         break;
@@ -373,7 +498,13 @@ std::wstring GetProcessName(DWORD processId) {
     return processName;
 }
 
-bool IsOlkWindow(HWND window) {
+std::wstring GetWindowClass(HWND window) {
+    wchar_t className[256] = {};
+    GetClassName(window, className, _countof(className));
+    return className;
+}
+
+bool IsTargetOutlookWindow(HWND window) {
     if (!IsWindow(window) || !IsWindowVisible(window) || GetAncestor(window, GA_ROOT) != window || GetWindow(window, GW_OWNER)) {
         return false;
     }
@@ -384,24 +515,47 @@ bool IsOlkWindow(HWND window) {
         return false;
     }
 
-    return _wcsicmp(GetProcessName(processId).c_str(), TARGET_PROCESS_NAME) == 0;
+    std::wstring processName = GetProcessName(processId);
+    if (_wcsicmp(processName.c_str(), NEW_OUTLOOK_PROCESS_NAME) == 0) {
+        return true;
+    }
+
+    if (_wcsicmp(processName.c_str(), CLASSIC_OUTLOOK_PROCESS_NAME) != 0) {
+        return false;
+    }
+
+    return _wcsicmp(GetWindowClass(window).c_str(), CLASSIC_OUTLOOK_MAIN_WINDOW_CLASS) == 0;
 }
 
-void TrackOlkWindow(HWND window) {
-    if (!SetHookForThread || !IsOlkWindow(window)) {
-        return;
+bool TrackOutlookWindow(HWND window, bool allowInitialHide) {
+    if (!SetHookForThread || !IsTargetOutlookWindow(window)) {
+        return false;
+    }
+
+    if (!IsWindowVisible(window)) {
+        return false;
+    }
+
+    if (trackedWindows.find(window) != trackedWindows.end()) {
+        return true;
+    }
+
+    if (!SetProp(window, TARGET_WINDOW_PROP, reinterpret_cast<HANDLE>(1))) {
+        return false;
     }
 
     DWORD processId = 0;
     DWORD threadId = GetWindowThreadProcessId(window, &processId);
     if (!threadId) {
-        return;
+        RemoveProp(window, TARGET_WINDOW_PROP);
+        return false;
     }
 
     auto trackedWindow = trackedWindowByProcess.find(processId);
     if (trackedWindow != trackedWindowByProcess.end()) {
         if (IsWindow(trackedWindow->second)) {
-            return;
+            RemoveProp(window, TARGET_WINDOW_PROP);
+            return true;
         }
         trackedWindowByProcess.erase(trackedWindow);
     }
@@ -412,18 +566,72 @@ void TrackOlkWindow(HWND window) {
             TCHAR errorMessage[256];
             _stprintf_s(errorMessage, L"Failed to install Outlook window hook! Error: %d\n", dwError);
             MessageBox(NULL, errorMessage, APP_NAME, MB_ICONERROR);
-            return;
+            RemoveProp(window, TARGET_WINDOW_PROP);
+            return false;
         }
         hookedThreads.insert(threadId);
-    }
-
-    if (!SetProp(window, TARGET_WINDOW_PROP, reinterpret_cast<HANDLE>(1))) {
-        return;
     }
 
     trackedWindows.insert(window);
     trackedWindowByProcess[processId] = window;
     trackedThreadByWindow[window] = threadId;
+
+    if (hideOnFirstOpen && allowInitialHide) {
+        ShowWindow(window, SW_HIDE);
+        hideOnFirstOpen = false;
+    }
+
+    return true;
+}
+
+HWND FindTrackedOutlookWindow() {
+    for (HWND window : trackedWindows) {
+        if (IsWindow(window)) {
+            return window;
+        }
+    }
+
+    return NULL;
+}
+
+void ToggleOutlookWindow() {
+    EnumWindows(EnumWindowsProc, 0);
+
+    HWND outlookWindow = FindTrackedOutlookWindow();
+    if (!outlookWindow) {
+        return;
+    }
+
+    if (IsWindowVisible(outlookWindow) && !IsIconic(outlookWindow)) {
+        ShowWindow(outlookWindow, SW_HIDE);
+    }
+    else {
+        ShowWindow(outlookWindow, SW_RESTORE);
+        SetForegroundWindow(outlookWindow);
+    }
+}
+
+bool RegisterToggleHotkey(HWND window) {
+    if (!hotkeyText.empty() && RegisterHotKey(window, HOTKEY_ID, hotkeyModifiers, hotkeyVirtualKey)) {
+        hotkeyRegistered = true;
+        return true;
+    }
+
+    if (!hotkeyText.empty()) {
+        DWORD dwError = GetLastError();
+        TCHAR errorMessage[256];
+        _stprintf_s(errorMessage, L"Failed to register hotkey %s. Error: %d", hotkeyText.c_str(), dwError);
+        MessageBox(NULL, errorMessage, APP_NAME, MB_ICONERROR);
+    }
+
+    return false;
+}
+
+void UnregisterToggleHotkey(HWND window) {
+    if (hotkeyRegistered) {
+        UnregisterHotKey(window, HOTKEY_ID);
+        hotkeyRegistered = false;
+    }
 }
 
 void RemoveTrackedWindow(HWND window) {
@@ -447,7 +655,7 @@ void RemoveTrackedWindow(HWND window) {
 }
 
 BOOL CALLBACK EnumWindowsProc(HWND window, LPARAM lParam) {
-    TrackOlkWindow(window);
+    TrackOutlookWindow(window, lParam != 0);
     return TRUE;
 }
 
@@ -457,7 +665,7 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hook, DWORD event, HWND window, LONG id
     }
 
     if (event == EVENT_OBJECT_CREATE || event == EVENT_OBJECT_SHOW) {
-        TrackOlkWindow(window);
+        TrackOutlookWindow(window, true);
     }
     else if (event == EVENT_OBJECT_DESTROY) {
         RemoveTrackedWindow(window);
@@ -556,6 +764,10 @@ int wmain(int argc, wchar_t* argv[]) {
     }
 
     trayEnabled = options.trayEnabled;
+    hideOnFirstOpen = options.hideOnFirstOpen;
+    hotkeyModifiers = options.hotkeyModifiers;
+    hotkeyVirtualKey = options.hotkeyVirtualKey;
+    hotkeyText = options.hotkeyText;
     FreeConsole();
 
     HANDLE hMutex = CreateMutex(NULL, TRUE, MUTEX_NAME);

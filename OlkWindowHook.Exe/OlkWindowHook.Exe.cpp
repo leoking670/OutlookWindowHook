@@ -35,6 +35,8 @@
 #define ID_TRAY_AUTOSTART   1004
 #define WM_SYSICON          (WM_USER + 1)
 
+constexpr wchar_t APP_NAME[] = L"Outlook Window Hook";
+constexpr wchar_t GITHUB_URL[] = L"https://github.com/leoking670/OutlookWindowHook";
 constexpr wchar_t TARGET_PROCESS_NAME[] = L"olk.exe";
 constexpr wchar_t TARGET_WINDOW_PROP[] = L"OlkWindowHook.TargetWindow";
 constexpr wchar_t CLEANUP_MESSAGE_NAME[] = L"OlkWindowHook.CleanupSubclass";
@@ -46,6 +48,21 @@ constexpr wchar_t APP_VERSION[] = L"1.1.0";
 typedef BOOL(*SET_HOOK_FOR_THREAD_PROC)(DWORD);
 typedef void(*REMOVE_HOOK_FOR_THREAD_PROC)(DWORD);
 typedef void(*REMOVE_HOOK_PROC)();
+
+enum class OneShotCommand {
+    None,
+    Status,
+    Exit,
+    Version,
+    Help
+};
+
+struct CommandOptions {
+    bool trayEnabled = true;
+    OneShotCommand command = OneShotCommand::None;
+    int parseExitCode = 0;
+    std::wstring invalidArg;
+};
 
 HINSTANCE hInst;
 NOTIFYICONDATA notifyIconData;
@@ -71,7 +88,7 @@ void PrintLine(const wchar_t* message) {
 }
 
 void PrintHelp() {
-    PrintLine(L"Outlook Window Hook 1.1.0");
+    wprintf(L"%s %s\n", APP_NAME, APP_VERSION);
     PrintLine(L"");
     PrintLine(L"Usage:");
     PrintLine(L"  OlkWindowHook.exe              Start with tray icon");
@@ -86,8 +103,98 @@ bool IsArg(const std::wstring& arg, const wchar_t* longName, const wchar_t* shor
     return _wcsicmp(arg.c_str(), longName) == 0 || (shortName && _wcsicmp(arg.c_str(), shortName) == 0);
 }
 
+bool SetOneShotCommand(CommandOptions& options, OneShotCommand command) {
+    if (options.command != OneShotCommand::None) {
+        options.parseExitCode = 2;
+        return false;
+    }
+
+    options.command = command;
+    return true;
+}
+
+CommandOptions ParseCommandLine(int argc, wchar_t* argv[]) {
+    CommandOptions options;
+
+    for (int i = 1; i < argc; i++) {
+        std::wstring arg = argv[i];
+        if (IsArg(arg, L"--no-tray")) {
+            options.trayEnabled = false;
+        }
+        else if (IsArg(arg, L"--status")) {
+            SetOneShotCommand(options, OneShotCommand::Status);
+        }
+        else if (IsArg(arg, L"--exit")) {
+            SetOneShotCommand(options, OneShotCommand::Exit);
+        }
+        else if (IsArg(arg, L"--version")) {
+            SetOneShotCommand(options, OneShotCommand::Version);
+        }
+        else if (IsArg(arg, L"--help", L"/?")) {
+            SetOneShotCommand(options, OneShotCommand::Help);
+        }
+        else {
+            options.invalidArg = arg;
+            options.parseExitCode = 2;
+        }
+    }
+
+    return options;
+}
+
 HWND FindRunningWindow() {
-    return FindWindowEx(HWND_MESSAGE, NULL, WINDOW_CLASS_NAME, L"Outlook Window Hook");
+    return FindWindowEx(HWND_MESSAGE, NULL, WINDOW_CLASS_NAME, APP_NAME);
+}
+
+int PrintStatus() {
+    if (FindRunningWindow()) {
+        PrintLine(L"running");
+        return 0;
+    }
+
+    PrintLine(L"not running");
+    return 1;
+}
+
+int RequestRunningInstanceExit() {
+    HWND runningWindow = FindRunningWindow();
+    if (!runningWindow) {
+        PrintLine(L"not running");
+        return 1;
+    }
+
+    UINT message = RegisterWindowMessage(CONTROL_MESSAGE_NAME);
+    SendMessageTimeout(runningWindow, message, 0, 0, SMTO_ABORTIFHUNG, 1000, NULL);
+    PrintLine(L"exit requested");
+    return 0;
+}
+
+int RunOneShotCommand(const CommandOptions& options) {
+    if (options.parseExitCode != 0) {
+        if (!options.invalidArg.empty()) {
+            fwprintf(stderr, L"Unknown option: %s\n\n", options.invalidArg.c_str());
+        }
+        else {
+            fwprintf(stderr, L"Only one command option can be used at a time.\n\n");
+        }
+        PrintHelp();
+        return options.parseExitCode;
+    }
+
+    switch (options.command) {
+    case OneShotCommand::Status:
+        return PrintStatus();
+    case OneShotCommand::Exit:
+        return RequestRunningInstanceExit();
+    case OneShotCommand::Version:
+        wprintf(L"%s %s\n", APP_NAME, APP_VERSION);
+        return 0;
+    case OneShotCommand::Help:
+        PrintHelp();
+        return 0;
+    default:
+        return 0;
+    }
 }
 
 INT_PTR CALLBACK AboutDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
@@ -102,7 +209,7 @@ INT_PTR CALLBACK AboutDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
             return (INT_PTR)TRUE;
         }
         else if (LOWORD(wParam) == IDC_OPEN_GITHUB) {
-            ShellExecute(NULL, L"open", L"https://github.com/leoking670/OutlookWindowHook", NULL, NULL, SW_SHOWNORMAL);
+            ShellExecute(NULL, L"open", GITHUB_URL, NULL, NULL, SW_SHOWNORMAL);
             return (INT_PTR)TRUE;
         }
         break;
@@ -125,46 +232,59 @@ void ManageStartup(bool add) {
 
     HKEY hKey;
     LPCTSTR czStartupKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-    LPCTSTR czValueName = L"Outlook Window Hook";
+    LPCTSTR czValueName = APP_NAME;
 
     if (RegOpenKeyEx(HKEY_CURRENT_USER, czStartupKey, 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
         if (add) {
             DWORD pathSize = static_cast<DWORD>((_tcslen(szPath) + 1) * sizeof(TCHAR));
             if (RegSetValueEx(hKey, czValueName, 0, REG_SZ, (LPBYTE)szPath, pathSize) == ERROR_SUCCESS) {
-                MessageBox(NULL, L"Successfully added to startup!", L"Outlook Window Hook", MB_OK | MB_ICONINFORMATION);
+                MessageBox(NULL, L"Successfully added to startup!", APP_NAME, MB_OK | MB_ICONINFORMATION);
             }
             else {
-                MessageBox(NULL, L"Failed to add to startup!", L"Outlook Window Hook", MB_OK | MB_ICONERROR);
+                MessageBox(NULL, L"Failed to add to startup!", APP_NAME, MB_OK | MB_ICONERROR);
             }
         }
         else {
             if (RegDeleteValue(hKey, czValueName) == ERROR_SUCCESS) {
-                MessageBox(NULL, L"Successfully removed from startup!", L"Outlook Window Hook", MB_OK | MB_ICONINFORMATION);
+                MessageBox(NULL, L"Successfully removed from startup!", APP_NAME, MB_OK | MB_ICONINFORMATION);
             }
             else {
-                MessageBox(NULL, L"Failed to remove from startup!", L"Outlook Window Hook", MB_OK | MB_ICONERROR);
+                MessageBox(NULL, L"Failed to remove from startup!", APP_NAME, MB_OK | MB_ICONERROR);
             }
         }
         RegCloseKey(hKey);
     }
     else {
-        MessageBox(NULL, L"Failed to open registry key!", L"Outlook Window Hook", MB_OK | MB_ICONERROR);
+        MessageBox(NULL, L"Failed to open registry key!", APP_NAME, MB_OK | MB_ICONERROR);
+    }
+}
+
+void AddTrayIcon(HWND window) {
+    if (!trayEnabled || trayIconAdded) {
+        return;
+    }
+
+    notifyIconData.cbSize = sizeof(NOTIFYICONDATA);
+    notifyIconData.hWnd = window;
+    notifyIconData.uID = ID_TRAY_APP_ICON;
+    notifyIconData.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
+    notifyIconData.uCallbackMessage = WM_SYSICON;
+    notifyIconData.hIcon = LoadIcon(hInst, MAKEINTRESOURCE(IDI_ICON));
+    wcscpy_s(notifyIconData.szTip, APP_NAME);
+    trayIconAdded = Shell_NotifyIcon(NIM_ADD, &notifyIconData);
+}
+
+void RemoveTrayIcon() {
+    if (trayIconAdded) {
+        Shell_NotifyIcon(NIM_DELETE, &notifyIconData);
+        trayIconAdded = false;
     }
 }
 
 LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
     case WM_CREATE:
-        if (trayEnabled) {
-            notifyIconData.cbSize = sizeof(NOTIFYICONDATA);
-            notifyIconData.hWnd = hwnd;
-            notifyIconData.uID = ID_TRAY_APP_ICON;
-            notifyIconData.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
-            notifyIconData.uCallbackMessage = WM_SYSICON;
-            notifyIconData.hIcon = LoadIcon(hInst, MAKEINTRESOURCE(IDI_ICON));
-            wcscpy_s(notifyIconData.szTip, L"Outlook Window Hook");
-            trayIconAdded = Shell_NotifyIcon(NIM_ADD, &notifyIconData);
-        }
+        AddTrayIcon(hwnd);
         break;
     case WM_SYSICON:
         if (lParam == WM_RBUTTONUP) {
@@ -178,7 +298,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
     case WM_COMMAND:
         switch (LOWORD(wParam)) {
         case ID_TRAY_EXIT:
-            Shell_NotifyIcon(NIM_DELETE, &notifyIconData);
             DestroyWindow(hwnd);
             break;
         case ID_TRAY_ABOUT:
@@ -206,10 +325,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         }
         break;
     case WM_DESTROY:
-        if (trayIconAdded) {
-            Shell_NotifyIcon(NIM_DELETE, &notifyIconData);
-            trayIconAdded = false;
-        }
+        RemoveTrayIcon();
         PostQuitMessage(0);
         break;
     default:
@@ -225,7 +341,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
 bool IsInStartup() {
     HKEY hKey;
     LPCTSTR czStartupKey = L"Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-    LPCTSTR czValueName = L"Outlook Window Hook";
+    LPCTSTR czValueName = APP_NAME;
 
     if (RegOpenKeyEx(HKEY_CURRENT_USER, czStartupKey, 0, KEY_QUERY_VALUE, &hKey) == ERROR_SUCCESS) {
         DWORD dwType = 0;
@@ -295,7 +411,7 @@ void TrackOlkWindow(HWND window) {
             DWORD dwError = GetLastError();
             TCHAR errorMessage[256];
             _stprintf_s(errorMessage, L"Failed to install Outlook window hook! Error: %d\n", dwError);
-            MessageBox(NULL, errorMessage, L"Outlook Window Hook", MB_ICONERROR);
+            MessageBox(NULL, errorMessage, APP_NAME, MB_ICONERROR);
             return;
         }
         hookedThreads.insert(threadId);
@@ -308,6 +424,26 @@ void TrackOlkWindow(HWND window) {
     trackedWindows.insert(window);
     trackedWindowByProcess[processId] = window;
     trackedThreadByWindow[window] = threadId;
+}
+
+void RemoveTrackedWindow(HWND window) {
+    trackedWindows.erase(window);
+
+    auto trackedThread = trackedThreadByWindow.find(window);
+    if (trackedThread != trackedThreadByWindow.end()) {
+        hookedThreads.erase(trackedThread->second);
+        if (RemoveHookForThread) {
+            RemoveHookForThread(trackedThread->second);
+        }
+        trackedThreadByWindow.erase(trackedThread);
+    }
+
+    for (auto it = trackedWindowByProcess.begin(); it != trackedWindowByProcess.end(); ++it) {
+        if (it->second == window) {
+            trackedWindowByProcess.erase(it);
+            break;
+        }
+    }
 }
 
 BOOL CALLBACK EnumWindowsProc(HWND window, LPARAM lParam) {
@@ -324,22 +460,7 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hook, DWORD event, HWND window, LONG id
         TrackOlkWindow(window);
     }
     else if (event == EVENT_OBJECT_DESTROY) {
-        trackedWindows.erase(window);
-        auto trackedThread = trackedThreadByWindow.find(window);
-        if (trackedThread != trackedThreadByWindow.end()) {
-            hookedThreads.erase(trackedThread->second);
-            if (RemoveHookForThread) {
-                RemoveHookForThread(trackedThread->second);
-            }
-            trackedThreadByWindow.erase(trackedThread);
-        }
-
-        for (auto it = trackedWindowByProcess.begin(); it != trackedWindowByProcess.end(); ++it) {
-            if (it->second == window) {
-                trackedWindowByProcess.erase(it);
-                break;
-            }
-        }
+        RemoveTrackedWindow(window);
     }
 }
 
@@ -352,7 +473,7 @@ void InitializeOutlookHooks() {
     std::wstring dllPath = exeDir + L"\\OlkWindowHook.dll";
     hModule = LoadLibrary(dllPath.c_str());
     if (!hModule) {
-        MessageBox(NULL, L"Failed to load OlkWindowHook.dll", L"Outlook Window Hook", MB_ICONERROR);
+        MessageBox(NULL, L"Failed to load OlkWindowHook.dll", APP_NAME, MB_ICONERROR);
         return;
     }
 
@@ -360,7 +481,12 @@ void InitializeOutlookHooks() {
     RemoveHookForThread = (REMOVE_HOOK_FOR_THREAD_PROC)GetProcAddress(hModule, "RemoveHookForThread");
     RemoveHook = (REMOVE_HOOK_PROC)GetProcAddress(hModule, "RemoveHook");
     if (!SetHookForThread || !RemoveHookForThread || !RemoveHook) {
-        MessageBox(NULL, L"Failed to find hook functions", L"Outlook Window Hook", MB_ICONERROR);
+        MessageBox(NULL, L"Failed to find hook functions", APP_NAME, MB_ICONERROR);
+        SetHookForThread = NULL;
+        RemoveHookForThread = NULL;
+        RemoveHook = NULL;
+        FreeLibrary(hModule);
+        hModule = NULL;
         return;
     }
 
@@ -377,7 +503,7 @@ void InitializeOutlookHooks() {
         WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
 
     if (!hCreateWindowEventHook) {
-        MessageBox(NULL, L"Failed to watch for Outlook windows", L"Outlook Window Hook", MB_ICONERROR);
+        MessageBox(NULL, L"Failed to watch for Outlook windows", APP_NAME, MB_ICONERROR);
     }
 }
 
@@ -387,15 +513,16 @@ void CleanupOutlookHooks() {
         hCreateWindowEventHook = NULL;
     }
 
-    for (HWND window : trackedWindows) {
+    std::unordered_set<HWND> windowsToClean = trackedWindows;
+    for (HWND window : windowsToClean) {
         if (IsWindow(window)) {
             if (cleanupMessage) {
                 SendMessageTimeout(window, cleanupMessage, 0, 0, SMTO_ABORTIFHUNG, 100, NULL);
             }
             RemoveProp(window, TARGET_WINDOW_PROP);
         }
+        RemoveTrackedWindow(window);
     }
-    trackedWindows.clear();
     trackedWindowByProcess.clear();
     trackedThreadByWindow.clear();
     hookedThreads.clear();
@@ -423,68 +550,12 @@ void CreateTrayIconMenu() {
 }
 
 int wmain(int argc, wchar_t* argv[]) {
-    bool commandMode = false;
-    bool startRequested = true;
-    int exitCode = 0;
-
-    for (int i = 1; i < argc; i++) {
-        std::wstring arg = argv[i];
-        if (IsArg(arg, L"--no-tray")) {
-            trayEnabled = false;
-        }
-        else if (IsArg(arg, L"--status")) {
-            commandMode = true;
-            startRequested = false;
-            HWND runningWindow = FindRunningWindow();
-            if (runningWindow) {
-                PrintLine(L"running");
-                exitCode = 0;
-            }
-            else {
-                PrintLine(L"not running");
-                exitCode = 1;
-            }
-        }
-        else if (IsArg(arg, L"--exit")) {
-            commandMode = true;
-            startRequested = false;
-            HWND runningWindow = FindRunningWindow();
-            if (runningWindow) {
-                UINT message = RegisterWindowMessage(CONTROL_MESSAGE_NAME);
-                SendMessageTimeout(runningWindow, message, 0, 0, SMTO_ABORTIFHUNG, 1000, NULL);
-                PrintLine(L"exit requested");
-                exitCode = 0;
-            }
-            else {
-                PrintLine(L"not running");
-                exitCode = 1;
-            }
-        }
-        else if (IsArg(arg, L"--version")) {
-            commandMode = true;
-            startRequested = false;
-            wprintf(L"Outlook Window Hook %s\n", APP_VERSION);
-            exitCode = 0;
-        }
-        else if (IsArg(arg, L"--help", L"/?")) {
-            commandMode = true;
-            startRequested = false;
-            PrintHelp();
-            exitCode = 0;
-        }
-        else {
-            commandMode = true;
-            startRequested = false;
-            fwprintf(stderr, L"Unknown option: %s\n\n", arg.c_str());
-            PrintHelp();
-            exitCode = 2;
-        }
+    CommandOptions options = ParseCommandLine(argc, argv);
+    if (options.command != OneShotCommand::None || options.parseExitCode != 0) {
+        return RunOneShotCommand(options);
     }
 
-    if (commandMode && !startRequested) {
-        return exitCode;
-    }
-
+    trayEnabled = options.trayEnabled;
     FreeConsole();
 
     HANDLE hMutex = CreateMutex(NULL, TRUE, MUTEX_NAME);
@@ -494,7 +565,7 @@ int wmain(int argc, wchar_t* argv[]) {
             return 0;
         }
         else {
-            MessageBox(NULL, L"Outlook Window Hook is already running", L"Outlook Window Hook", MB_OK | MB_ICONEXCLAMATION);
+            MessageBox(NULL, L"Outlook Window Hook is already running", APP_NAME, MB_OK | MB_ICONEXCLAMATION);
         }
 
         CloseHandle(hMutex);
@@ -521,7 +592,7 @@ int wmain(int argc, wchar_t* argv[]) {
 
     RegisterClassEx(&wcex);
 
-    hwnd = CreateWindowEx(0, WINDOW_CLASS_NAME, L"Outlook Window Hook", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, hInst, NULL);
+    hwnd = CreateWindowEx(0, WINDOW_CLASS_NAME, APP_NAME, 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, hInst, NULL);
 
     if (trayEnabled) {
         CreateTrayIconMenu();

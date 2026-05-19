@@ -4,9 +4,11 @@ Keeps Outlook running in the background when the main window is closed, similar 
 
 **Currently only works with the new Outlook client** - if there's enough interest I'd be happy to implement support for older versions!
 
+Maintained fork by [leoking670](https://github.com/leoking670). Original project by [Oliver Dalton / Palsternakka](https://github.com/Palsternakka/OutlookWindowHook).
+
 ## Download
 
-You can find the installer or a standalone version [on the Releases page here](https://github.com/Palsternakka/OutlookWindowHook/releases) - please note for the standalone version `OlkWindowHook.dll` must be in the same directory as `OlkWindowHook.exe`
+You can find the installer or a standalone version [on the Releases page here](https://github.com/leoking670/OutlookWindowHook/releases) - please note for the standalone version `OlkWindowHook.dll` must be in the same directory as `OlkWindowHook.exe`
 
 ## Features
 
@@ -15,9 +17,9 @@ You can find the installer or a standalone version [on the Releases page here](h
 
 ## How it works
 
-1. Checks for new instances of `olk.exe` every 0.5 seconds
-2. If a new instance is found, hooks in to the first window created
-3. Intercepts the `WM_CLOSE` event and instead calls `ShowWindow(pCwp->hwnd, SW_HIDE)`
+1. Watches for top-level windows created by `olk.exe`
+2. Installs a `WH_CALLWNDPROC` hook only on the Outlook window thread
+3. Intercepts the tracked window's `WM_CLOSE` event and instead calls `ShowWindow(hwnd, SW_HIDE)`
 
 ## Building the installer
 
@@ -25,4 +27,4 @@ To build the `OlkWindowHook.Installer` project requires the [Windows SDK MSI Too
 
 ## Licence
 
-[GPL-3.0](https://github.com/Palsternakka/OutlookWindowHook?tab=GPL-3.0-1-ov-file)
+[GPL-3.0](https://github.com/leoking670/OutlookWindowHook?tab=GPL-3.0-1-ov-file)

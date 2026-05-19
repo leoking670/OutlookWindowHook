@@ -2,6 +2,8 @@
 *   Outlook Window Hook
 *   Keeps Outlook running when main window is closed
 *   Copyright (C) 2024  Oliver Dalton
+*   Modifications Copyright (C) 2026  leoking670
+*   Modified in 2026 by leoking670
 *
 *   This program is free software: you can redistribute it and/or modify
 *   it under the terms of the GNU General Public License as published by
@@ -18,120 +20,129 @@
 */
 
 #include <windows.h>
-#include <psapi.h>
-#include <tchar.h>
-#include <unordered_map>
-#include <thread>
-#include <mutex>
 #include <commctrl.h>
+#include <unordered_map>
+#include <unordered_set>
+#include <mutex>
 
-#pragma comment(lib, "Psapi.lib")
 #pragma comment(lib, "Comctl32.lib")
 
-HHOOK hHookCallWndProc = NULL;
+constexpr wchar_t TARGET_WINDOW_PROP[] = L"OlkWindowHook.TargetWindow";
+constexpr wchar_t CLEANUP_MESSAGE_NAME[] = L"OlkWindowHook.CleanupSubclass";
+
 HINSTANCE hInstance;
-std::unordered_map < HWND, bool > ignoreCloseMessage;
-std::unordered_map < DWORD, HWND > firstOlkWindowMap;
+std::unordered_map<DWORD, HHOOK> hooksByThread;
+std::unordered_set<HWND> subclassedWindows;
 std::mutex mapMutex;
-bool hookSet = false;
+UINT cleanupMessage = 0;
 
-BOOL IsOlkExeProcess(HWND hwnd) {
-    DWORD procId;
-    GetWindowThreadProcessId(hwnd, &procId);
+LRESULT CALLBACK SubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
 
-    HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, procId);
-    if (hProcess) {
-        TCHAR processName[MAX_PATH];
-        if (GetModuleBaseName(hProcess, NULL, processName, sizeof(processName) / sizeof(TCHAR))) {
-            CloseHandle(hProcess);
-            return _tcsicmp(processName, L"olk.exe") == 0;
-        }
-        CloseHandle(hProcess);
+UINT GetCleanupMessage() {
+    if (!cleanupMessage) {
+        cleanupMessage = RegisterWindowMessage(CLEANUP_MESSAGE_NAME);
     }
-    return FALSE;
+    return cleanupMessage;
 }
 
-BOOL IsFirstOlkExeWindow(HWND hwnd) {
-    DWORD procId;
-    GetWindowThreadProcessId(hwnd, &procId);
+BOOL IsTargetWindow(HWND hwnd) {
+    return GetProp(hwnd, TARGET_WINDOW_PROP) != NULL;
+}
 
-    std::lock_guard < std::mutex > lock(mapMutex);
-    if (firstOlkWindowMap.find(procId) == firstOlkWindowMap.end()) {
-        firstOlkWindowMap[procId] = hwnd;
-        return TRUE;
-    }
-    return firstOlkWindowMap[procId] == hwnd;
+void RemoveSubclass(HWND hwnd) {
+    RemoveWindowSubclass(hwnd, SubclassProc, 1);
+    RemoveProp(hwnd, TARGET_WINDOW_PROP);
+
+    std::lock_guard<std::mutex> lock(mapMutex);
+    subclassedWindows.erase(hwnd);
 }
 
 LRESULT CALLBACK SubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData) {
-    if (uMsg == WM_CLOSE) {
-        std::lock_guard < std::mutex > lock(mapMutex);
-        if (ignoreCloseMessage[hwnd]) {
-            ignoreCloseMessage[hwnd] = false;
-            return 0;
+    UINT cleanupMsg = GetCleanupMessage();
+
+    if (cleanupMsg && uMsg == cleanupMsg) {
+        RemoveSubclass(hwnd);
+        return 0;
+    }
+
+    if (uMsg == WM_CLOSE && IsTargetWindow(hwnd)) {
+        ShowWindow(hwnd, SW_HIDE);
+        return 0;
+    }
+
+    if (uMsg == WM_NCDESTROY) {
+        RemoveSubclass(hwnd);
+    }
+
+    return DefSubclassProc(hwnd, uMsg, wParam, lParam);
+}
+
+void EnsureSubclass(HWND hwnd) {
+    std::lock_guard<std::mutex> lock(mapMutex);
+    if (subclassedWindows.find(hwnd) == subclassedWindows.end()) {
+        if (SetWindowSubclass(hwnd, SubclassProc, 1, 0)) {
+            subclassedWindows.insert(hwnd);
         }
     }
-    return DefSubclassProc(hwnd, uMsg, wParam, lParam);
 }
 
 LRESULT CALLBACK CallWndProc(int nCode, WPARAM wParam, LPARAM lParam) {
     if (nCode >= 0) {
         CWPSTRUCT* pCwp = (CWPSTRUCT*)lParam;
-        if (pCwp->message == WM_CLOSE && IsOlkExeProcess(pCwp->hwnd) && IsFirstOlkExeWindow(pCwp->hwnd)) {
-            {
-                std::lock_guard < std::mutex > lock(mapMutex);
-                if (!ignoreCloseMessage.count(pCwp->hwnd)) {
-                    SetWindowSubclass(pCwp->hwnd, SubclassProc, 1, 0);
-                }
-            }
+
+        if (GetCleanupMessage() && pCwp->message == cleanupMessage && IsTargetWindow(pCwp->hwnd)) {
+            RemoveSubclass(pCwp->hwnd);
+        }
+        else if (pCwp->message == WM_CLOSE && IsTargetWindow(pCwp->hwnd)) {
+            EnsureSubclass(pCwp->hwnd);
             ShowWindow(pCwp->hwnd, SW_HIDE);
-            std::lock_guard < std::mutex > lock(mapMutex);
-            ignoreCloseMessage[pCwp->hwnd] = true;
             return 0;
         }
     }
-    return CallNextHookEx(hHookCallWndProc, nCode, wParam, lParam);
-}
-
-void KeepDLLLoaded() {
-    while (true) {
-        Sleep(1000);
-    }
+    return CallNextHookEx(NULL, nCode, wParam, lParam);
 }
 
 extern "C"
-__declspec(dllexport) void SetHook() {
-    std::lock_guard < std::mutex > lock(mapMutex);
-    if (!hookSet) {
-        hHookCallWndProc = SetWindowsHookEx(WH_CALLWNDPROC, CallWndProc, hInstance, 0);
-        if (!hHookCallWndProc) {
-            DWORD dwError = GetLastError();
-            TCHAR errorMessage[256];
-            _stprintf_s(errorMessage, L"Failed to install WH_CALLWNDPROC hook! Error: %d\n", dwError);
-            MessageBox(NULL, errorMessage, L"Outlook Window Hook", MB_ICONERROR);
-        }
-        else {
-            hookSet = true;
-        }
-        std::thread(KeepDLLLoaded).detach();
+__declspec(dllexport) BOOL SetHookForThread(DWORD threadId) {
+    std::lock_guard<std::mutex> lock(mapMutex);
+    if (hooksByThread.find(threadId) != hooksByThread.end()) {
+        return TRUE;
+    }
+
+    HHOOK hook = SetWindowsHookEx(WH_CALLWNDPROC, CallWndProc, hInstance, threadId);
+    if (!hook) {
+        return FALSE;
+    }
+
+    hooksByThread[threadId] = hook;
+    return TRUE;
+}
+
+extern "C"
+__declspec(dllexport) void RemoveHookForThread(DWORD threadId) {
+    std::lock_guard<std::mutex> lock(mapMutex);
+    auto hook = hooksByThread.find(threadId);
+    if (hook != hooksByThread.end()) {
+        UnhookWindowsHookEx(hook->second);
+        hooksByThread.erase(hook);
     }
 }
 
 extern "C"
 __declspec(dllexport) void RemoveHook() {
-    std::lock_guard < std::mutex > lock(mapMutex);
-    if (hHookCallWndProc) {
-        UnhookWindowsHookEx(hHookCallWndProc);
-        hHookCallWndProc = NULL;
-        hookSet = false;
+    std::lock_guard<std::mutex> lock(mapMutex);
+    for (auto& hook : hooksByThread) {
+        UnhookWindowsHookEx(hook.second);
     }
+    hooksByThread.clear();
 }
 
 BOOL APIENTRY DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
     switch (fdwReason) {
     case DLL_PROCESS_ATTACH:
         hInstance = hinstDLL;
-        InitCommonControls(); // Initialize common controls
+        DisableThreadLibraryCalls(hinstDLL);
+        InitCommonControls();
         break;
     }
     return TRUE;

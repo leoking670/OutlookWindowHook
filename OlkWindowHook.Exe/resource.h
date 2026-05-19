@@ -2,6 +2,8 @@
 *   Outlook Window Hook
 *   Keeps Outlook running when main window is closed
 *   Copyright (C) 2024  Oliver Dalton
+*   Modifications Copyright (C) 2026  leoking670
+*   Modified in 2026 by leoking670
 *
 *   This program is free software: you can redistribute it and/or modify
 *   it under the terms of the GNU General Public License as published by

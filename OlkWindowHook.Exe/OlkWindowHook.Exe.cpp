@@ -2,6 +2,8 @@
 *   Outlook Window Hook
 *   Keeps Outlook running when main window is closed
 *   Copyright (C) 2024  Oliver Dalton
+*   Modifications Copyright (C) 2026  leoking670
+*   Modified in 2026 by leoking670
 *
 *   This program is free software: you can redistribute it and/or modify
 *   it under the terms of the GNU General Public License as published by
@@ -18,11 +20,10 @@
 */
 
 #include <windows.h>
-#include <tlhelp32.h>
 #include <tchar.h>
 #include <string>
-#include <sstream>
-#include <thread>
+#include <unordered_map>
+#include <unordered_set>
 #include <shellapi.h>
 #include "resource.h"
 
@@ -33,60 +34,13 @@
 #define ID_TRAY_AUTOSTART   1004
 #define WM_SYSICON          (WM_USER + 1)
 
-typedef void(*SET_HOOK_PROC)();
+constexpr wchar_t TARGET_PROCESS_NAME[] = L"olk.exe";
+constexpr wchar_t TARGET_WINDOW_PROP[] = L"OlkWindowHook.TargetWindow";
+constexpr wchar_t CLEANUP_MESSAGE_NAME[] = L"OlkWindowHook.CleanupSubclass";
+
+typedef BOOL(*SET_HOOK_FOR_THREAD_PROC)(DWORD);
+typedef void(*REMOVE_HOOK_FOR_THREAD_PROC)(DWORD);
 typedef void(*REMOVE_HOOK_PROC)();
-
-DWORD FindProcessId(const std::wstring& processName) {
-    DWORD processId = 0;
-    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (hSnap != INVALID_HANDLE_VALUE) {
-        PROCESSENTRY32 pe32{};
-        pe32.dwSize = sizeof(PROCESSENTRY32);
-        if (Process32First(hSnap, &pe32)) {
-            do {
-                if (std::wstring(pe32.szExeFile) == processName) {
-                    processId = pe32.th32ProcessID;
-                    break;
-                }
-            } while (Process32Next(hSnap, &pe32));
-        }
-        CloseHandle(hSnap);
-    }
-    return processId;
-}
-
-void InjectDLL(DWORD processID,
-    const wchar_t* dllPath) {
-    HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, processID);
-    if (!hProcess) {
-        MessageBox(NULL, L"Failed to open target process", L"Outlook Window Hook", MB_ICONERROR);
-        return;
-    }
-
-    size_t pathLength = (wcslen(dllPath) + 1) * sizeof(wchar_t);
-    void* pLibRemote = VirtualAllocEx(hProcess, NULL, pathLength, MEM_COMMIT, PAGE_READWRITE);
-    if (!pLibRemote) {
-        MessageBox(NULL, L"Failed to allocate memory in target process", L"Outlook Window Hook", MB_ICONERROR);
-        CloseHandle(hProcess);
-        return;
-    }
-
-    WriteProcessMemory(hProcess, pLibRemote, (void*)dllPath, pathLength, NULL);
-
-    HANDLE hThread = CreateRemoteThread(hProcess, NULL, 0, (LPTHREAD_START_ROUTINE)LoadLibraryW, pLibRemote, 0, NULL);
-    if (!hThread) {
-        MessageBox(NULL, L"Failed to create remote thread", L"Outlook Window Hook", MB_ICONERROR);
-        VirtualFreeEx(hProcess, pLibRemote, 0, MEM_RELEASE);
-        CloseHandle(hProcess);
-        return;
-    }
-
-    WaitForSingleObject(hThread, INFINITE);
-
-    VirtualFreeEx(hProcess, pLibRemote, 0, MEM_RELEASE);
-    CloseHandle(hThread);
-    CloseHandle(hProcess);
-}
 
 HINSTANCE hInst;
 NOTIFYICONDATA notifyIconData;
@@ -94,7 +48,15 @@ HMENU hPopupMenu;
 HWND hwnd;
 HWND hAboutDlg = NULL;
 HMODULE hModule = NULL;
-bool appRunning = true;
+HWINEVENTHOOK hCreateWindowEventHook = NULL;
+SET_HOOK_FOR_THREAD_PROC SetHookForThread = NULL;
+REMOVE_HOOK_FOR_THREAD_PROC RemoveHookForThread = NULL;
+REMOVE_HOOK_PROC RemoveHook = NULL;
+std::unordered_set<DWORD> hookedThreads;
+std::unordered_set<HWND> trackedWindows;
+std::unordered_map<DWORD, HWND> trackedWindowByProcess;
+std::unordered_map<HWND, DWORD> trackedThreadByWindow;
+UINT cleanupMessage = 0;
 
 INT_PTR CALLBACK AboutDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
@@ -108,7 +70,7 @@ INT_PTR CALLBACK AboutDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
             return (INT_PTR)TRUE;
         }
         else if (LOWORD(wParam) == IDC_OPEN_GITHUB) {
-            ShellExecute(NULL, L"open", L"https://github.com/Palsternakka/OutlookWindowHook", NULL, NULL, SW_SHOWNORMAL);
+            ShellExecute(NULL, L"open", L"https://github.com/leoking670/OutlookWindowHook", NULL, NULL, SW_SHOWNORMAL);
             return (INT_PTR)TRUE;
         }
         break;
@@ -135,7 +97,8 @@ void ManageStartup(bool add) {
 
     if (RegOpenKeyEx(HKEY_CURRENT_USER, czStartupKey, 0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
         if (add) {
-            if (RegSetValueEx(hKey, czValueName, 0, REG_SZ, (LPBYTE)szPath, (_tcslen(szPath) + 1) * sizeof(TCHAR)) == ERROR_SUCCESS) {
+            DWORD pathSize = static_cast<DWORD>((_tcslen(szPath) + 1) * sizeof(TCHAR));
+            if (RegSetValueEx(hKey, czValueName, 0, REG_SZ, (LPBYTE)szPath, pathSize) == ERROR_SUCCESS) {
                 MessageBox(NULL, L"Successfully added to startup!", L"Outlook Window Hook", MB_OK | MB_ICONINFORMATION);
             }
             else {
@@ -211,7 +174,6 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
     case WM_DESTROY:
         Shell_NotifyIcon(NIM_DELETE, &notifyIconData);
         PostQuitMessage(0);
-        appRunning = false;
         break;
     default:
         return DefWindowProc(hwnd, uMsg, wParam, lParam);
@@ -238,6 +200,175 @@ bool IsInStartup() {
     return false;
 }
 
+std::wstring GetProcessName(DWORD processId) {
+    std::wstring processName;
+    HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
+    if (hProcess) {
+        wchar_t path[MAX_PATH];
+        DWORD size = MAX_PATH;
+        if (QueryFullProcessImageName(hProcess, 0, path, &size)) {
+            std::wstring fullPath = path;
+            size_t slashPos = fullPath.find_last_of(L"\\/");
+            processName = slashPos == std::wstring::npos ? fullPath : fullPath.substr(slashPos + 1);
+        }
+        CloseHandle(hProcess);
+    }
+    return processName;
+}
+
+bool IsOlkWindow(HWND window) {
+    if (!IsWindow(window) || !IsWindowVisible(window) || GetAncestor(window, GA_ROOT) != window || GetWindow(window, GW_OWNER)) {
+        return false;
+    }
+
+    DWORD processId = 0;
+    GetWindowThreadProcessId(window, &processId);
+    if (!processId) {
+        return false;
+    }
+
+    return _wcsicmp(GetProcessName(processId).c_str(), TARGET_PROCESS_NAME) == 0;
+}
+
+void TrackOlkWindow(HWND window) {
+    if (!SetHookForThread || !IsOlkWindow(window)) {
+        return;
+    }
+
+    DWORD processId = 0;
+    DWORD threadId = GetWindowThreadProcessId(window, &processId);
+    if (!threadId) {
+        return;
+    }
+
+    auto trackedWindow = trackedWindowByProcess.find(processId);
+    if (trackedWindow != trackedWindowByProcess.end()) {
+        if (IsWindow(trackedWindow->second)) {
+            return;
+        }
+        trackedWindowByProcess.erase(trackedWindow);
+    }
+
+    if (hookedThreads.find(threadId) == hookedThreads.end()) {
+        if (!SetHookForThread(threadId)) {
+            DWORD dwError = GetLastError();
+            TCHAR errorMessage[256];
+            _stprintf_s(errorMessage, L"Failed to install Outlook window hook! Error: %d\n", dwError);
+            MessageBox(NULL, errorMessage, L"Outlook Window Hook", MB_ICONERROR);
+            return;
+        }
+        hookedThreads.insert(threadId);
+    }
+
+    if (!SetProp(window, TARGET_WINDOW_PROP, reinterpret_cast<HANDLE>(1))) {
+        return;
+    }
+
+    trackedWindows.insert(window);
+    trackedWindowByProcess[processId] = window;
+    trackedThreadByWindow[window] = threadId;
+}
+
+BOOL CALLBACK EnumWindowsProc(HWND window, LPARAM lParam) {
+    TrackOlkWindow(window);
+    return TRUE;
+}
+
+void CALLBACK WinEventProc(HWINEVENTHOOK hook, DWORD event, HWND window, LONG idObject, LONG idChild, DWORD eventThread, DWORD eventTime) {
+    if (idObject != OBJID_WINDOW || idChild != CHILDID_SELF) {
+        return;
+    }
+
+    if (event == EVENT_OBJECT_CREATE || event == EVENT_OBJECT_SHOW) {
+        TrackOlkWindow(window);
+    }
+    else if (event == EVENT_OBJECT_DESTROY) {
+        trackedWindows.erase(window);
+        auto trackedThread = trackedThreadByWindow.find(window);
+        if (trackedThread != trackedThreadByWindow.end()) {
+            hookedThreads.erase(trackedThread->second);
+            if (RemoveHookForThread) {
+                RemoveHookForThread(trackedThread->second);
+            }
+            trackedThreadByWindow.erase(trackedThread);
+        }
+
+        for (auto it = trackedWindowByProcess.begin(); it != trackedWindowByProcess.end(); ++it) {
+            if (it->second == window) {
+                trackedWindowByProcess.erase(it);
+                break;
+            }
+        }
+    }
+}
+
+void InitializeOutlookHooks() {
+    wchar_t exePath[MAX_PATH];
+    GetModuleFileName(NULL, exePath, MAX_PATH);
+    std::wstring exeDir = exePath;
+    exeDir = exeDir.substr(0, exeDir.find_last_of(L"\\"));
+
+    std::wstring dllPath = exeDir + L"\\OlkWindowHook.dll";
+    hModule = LoadLibrary(dllPath.c_str());
+    if (!hModule) {
+        MessageBox(NULL, L"Failed to load OlkWindowHook.dll", L"Outlook Window Hook", MB_ICONERROR);
+        return;
+    }
+
+    SetHookForThread = (SET_HOOK_FOR_THREAD_PROC)GetProcAddress(hModule, "SetHookForThread");
+    RemoveHookForThread = (REMOVE_HOOK_FOR_THREAD_PROC)GetProcAddress(hModule, "RemoveHookForThread");
+    RemoveHook = (REMOVE_HOOK_PROC)GetProcAddress(hModule, "RemoveHook");
+    if (!SetHookForThread || !RemoveHookForThread || !RemoveHook) {
+        MessageBox(NULL, L"Failed to find hook functions", L"Outlook Window Hook", MB_ICONERROR);
+        return;
+    }
+
+    cleanupMessage = RegisterWindowMessage(CLEANUP_MESSAGE_NAME);
+    EnumWindows(EnumWindowsProc, 0);
+
+    hCreateWindowEventHook = SetWinEventHook(
+        EVENT_OBJECT_CREATE,
+        EVENT_OBJECT_SHOW,
+        NULL,
+        WinEventProc,
+        0,
+        0,
+        WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+
+    if (!hCreateWindowEventHook) {
+        MessageBox(NULL, L"Failed to watch for Outlook windows", L"Outlook Window Hook", MB_ICONERROR);
+    }
+}
+
+void CleanupOutlookHooks() {
+    if (hCreateWindowEventHook) {
+        UnhookWinEvent(hCreateWindowEventHook);
+        hCreateWindowEventHook = NULL;
+    }
+
+    for (HWND window : trackedWindows) {
+        if (IsWindow(window)) {
+            if (cleanupMessage) {
+                SendMessageTimeout(window, cleanupMessage, 0, 0, SMTO_ABORTIFHUNG, 100, NULL);
+            }
+            RemoveProp(window, TARGET_WINDOW_PROP);
+        }
+    }
+    trackedWindows.clear();
+    trackedWindowByProcess.clear();
+    trackedThreadByWindow.clear();
+    hookedThreads.clear();
+
+    if (RemoveHook) {
+        RemoveHook();
+    }
+
+    if (hModule) {
+        FreeLibrary(hModule);
+        hModule = NULL;
+    }
+}
+
 void CreateTrayIconMenu() {
     hPopupMenu = CreatePopupMenu();
     AppendMenu(hPopupMenu, MF_STRING, ID_TRAY_ABOUT, L"About");
@@ -248,60 +379,6 @@ void CreateTrayIconMenu() {
 
     AppendMenu(hPopupMenu, MF_SEPARATOR, 0, NULL);
     AppendMenu(hPopupMenu, MF_STRING, ID_TRAY_EXIT, L"Exit");
-}
-
-void MonitorProcess() {
-    wchar_t exePath[MAX_PATH];
-    GetModuleFileName(NULL, exePath, MAX_PATH);
-    std::wstring exeDir = exePath;
-    exeDir = exeDir.substr(0, exeDir.find_last_of(L"\\"));
-
-    std::wstringstream dllPathStream;
-    dllPathStream << exeDir << L"\\OlkWindowHook.dll";
-    std::wstring dllPath = dllPathStream.str();
-
-    DWORD prevProcessID = 0;
-
-    while (appRunning) {
-        DWORD processID = FindProcessId(L"olk.exe");
-
-        if (processID != 0 && processID != prevProcessID) {
-            InjectDLL(processID, dllPath.c_str());
-
-            if (!hModule) {
-                hModule = LoadLibrary(dllPath.c_str());
-            }
-
-            if (hModule) {
-                SET_HOOK_PROC SetHook = (SET_HOOK_PROC)GetProcAddress(hModule, "SetHook");
-                if (SetHook) {
-                    SetHook();
-                }
-                else {
-                    MessageBox(NULL, L"Failed to find SetHook function", L"Outlook Window Hook", MB_ICONERROR);
-                }
-            }
-            else {
-                MessageBox(NULL, L"Failed to load OlkWindowHook.dll", L"Outlook Window Hook", MB_ICONERROR);
-            }
-
-            prevProcessID = processID;
-        }
-
-        if (processID == 0) {
-            prevProcessID = 0;
-        }
-
-        Sleep(500);
-    }
-
-    if (hModule) {
-        REMOVE_HOOK_PROC RemoveHook = (REMOVE_HOOK_PROC)GetProcAddress(hModule, "RemoveHook");
-        if (RemoveHook) {
-            RemoveHook();
-        }
-        FreeLibrary(hModule);
-    }
 }
 
 int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
@@ -337,15 +414,15 @@ int APIENTRY WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLi
     hwnd = CreateWindowEx(0, L"OlkWindowHookClass", L"Outlook Window Hook", 0, 0, 0, 0, 0, HWND_MESSAGE, NULL, hInstance, NULL);
 
     CreateTrayIconMenu();
-
-    std::thread monitorThread(MonitorProcess);
-    monitorThread.detach();
+    InitializeOutlookHooks();
 
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0)) {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
     }
+
+    CleanupOutlookHooks();
 
     CloseHandle(hMutex);
 

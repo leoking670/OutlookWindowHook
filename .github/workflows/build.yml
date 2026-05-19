@@ -1,0 +1,53 @@
+name: Build
+
+on:
+  push:
+    tags:
+      - "v*"
+    branches:
+      - "**"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build Release x64
+        run: msbuild OlkWindowHook.sln /p:Configuration=Release /p:Platform=x64 /m
+
+      - name: Prepare package
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF_TYPE -eq "tag") { $env:GITHUB_REF_NAME.TrimStart("v") } else { $env:GITHUB_SHA.Substring(0, 7) }
+          $packageName = "OutlookWindowHook-v$version-x64"
+          New-Item -ItemType Directory -Force -Path "artifacts\$packageName" | Out-Null
+          Copy-Item "x64\Release\OlkWindowHook.exe" "artifacts\$packageName\"
+          Copy-Item "x64\Release\OlkWindowHook.dll" "artifacts\$packageName\"
+          Copy-Item "LICENSE" "artifacts\$packageName\"
+          Copy-Item "README.md" "artifacts\$packageName\"
+          Compress-Archive -Path "artifacts\$packageName\*" -DestinationPath "artifacts\$packageName.zip" -Force
+          "PACKAGE_NAME=$packageName" >> $env:GITHUB_ENV
+          "PACKAGE_PATH=artifacts\$packageName.zip" >> $env:GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PACKAGE_NAME }}
+          path: ${{ env.PACKAGE_PATH }}
+
+      - name: Upload release asset
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.PACKAGE_PATH }}

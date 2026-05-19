@@ -8,12 +8,24 @@ Maintained fork by [leoking670](https://github.com/leoking670). Original project
 
 ## Download
 
-You can find the installer or a standalone version [on the Releases page here](https://github.com/leoking670/OutlookWindowHook/releases) - please note for the standalone version `OlkWindowHook.dll` must be in the same directory as `OlkWindowHook.exe`
+Download the x64 binary zip from the [Releases page](https://github.com/leoking670/OutlookWindowHook/releases). Extract the zip and keep `OlkWindowHook.dll` in the same directory as `OlkWindowHook.exe`.
 
 ## Features
 
 - Option to add to Startup (after running, right click the system tray icon and tick Autostart)
-- No need for admin privileges - installs to your AppData folder
+- No need for admin privileges
+- Optional command-line control for background/no-tray usage
+
+## Command line
+
+```powershell
+OlkWindowHook.exe              # Start with tray icon
+OlkWindowHook.exe --no-tray    # Start in background without tray icon
+OlkWindowHook.exe --status     # Print whether the app is running
+OlkWindowHook.exe --exit       # Stop the running instance
+OlkWindowHook.exe --version    # Print version
+OlkWindowHook.exe --help       # Print usage
+```
 
 ## How it works
 
@@ -21,9 +33,9 @@ You can find the installer or a standalone version [on the Releases page here](h
 2. Installs a `WH_CALLWNDPROC` hook only on the Outlook window thread
 3. Intercepts the tracked window's `WM_CLOSE` event and instead calls `ShowWindow(hwnd, SW_HIDE)`
 
-## Building the installer
+## Building
 
-To build the `OlkWindowHook.Installer` project requires the [Windows SDK MSI Tools](https://developer.microsoft.com/en-us/windows/downloads/windows-sdk/). You will need to make sure that the `OlkWindowHook.Installer` project properties (namely the `PostBuildEvent`) point to your installation of `MsiInfo.exe` - this is required to set the flags on the installer to indicate admin rights aren't required
+Build `Release|x64` with Visual Studio 2026 or MSBuild. Releases are distributed as a zip containing `OlkWindowHook.exe`, `OlkWindowHook.dll`, `LICENSE`, and `README.md`; MSI installer builds are no longer provided.
 
 ## Licence
 

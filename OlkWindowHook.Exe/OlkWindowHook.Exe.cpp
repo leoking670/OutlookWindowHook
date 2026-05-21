@@ -22,6 +22,7 @@
 #include <windows.h>
 #include <tchar.h>
 #include <cwctype>
+#include <tlhelp32.h>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -50,6 +51,8 @@ constexpr wchar_t WINDOW_CLASS_NAME[] = L"OlkWindowHookClass";
 constexpr wchar_t MUTEX_NAME[] = L"OlkWindowHook";
 constexpr wchar_t APP_VERSION[] = L"1.2.0";
 constexpr int HOTKEY_ID = 1;
+constexpr UINT_PTR COLD_START_TIMER_ID = 2;
+constexpr UINT COLD_START_CHECK_MS = 1000;
 
 typedef BOOL(*SET_HOOK_FOR_THREAD_PROC)(DWORD);
 typedef void(*REMOVE_HOOK_FOR_THREAD_PROC)(DWORD);
@@ -95,6 +98,7 @@ UINT controlMessage = 0;
 bool trayEnabled = true;
 bool trayIconAdded = false;
 bool hideOnFirstOpen = false;
+bool hideOnColdStartArmed = false;
 bool hotkeyRegistered = false;
 UINT hotkeyModifiers = 0;
 UINT hotkeyVirtualKey = 0;
@@ -104,6 +108,8 @@ BOOL CALLBACK EnumWindowsProc(HWND window, LPARAM lParam);
 void ToggleOutlookWindow();
 bool RegisterToggleHotkey(HWND window);
 void UnregisterToggleHotkey(HWND window);
+bool IsAnyOutlookProcessRunning();
+void UpdateColdStartArmedState();
 
 void PrintLine(const wchar_t* message) {
     wprintf(L"%s\n", message);
@@ -118,7 +124,7 @@ void PrintHelp() {
     PrintLine(L"  OlkWindowHook.exe --hotkey Ctrl+Alt+O");
     PrintLine(L"                                 Toggle the Outlook main window");
     PrintLine(L"  OlkWindowHook.exe --hide-on-first-open");
-    PrintLine(L"                                 Hide the first Outlook main window opened after startup");
+    PrintLine(L"                                 Hide the first Outlook main window opened after each cold start");
     PrintLine(L"  OlkWindowHook.exe --status     Show whether the app is running");
     PrintLine(L"  OlkWindowHook.exe --exit       Stop the running instance");
     PrintLine(L"  OlkWindowHook.exe --version    Show version");
@@ -412,6 +418,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
             ToggleOutlookWindow();
         }
         break;
+    case WM_TIMER:
+        if (wParam == COLD_START_TIMER_ID) {
+            UpdateColdStartArmedState();
+        }
+        break;
     case WM_SYSICON:
         if (lParam == WM_RBUTTONUP) {
             POINT curPoint;
@@ -451,6 +462,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
         }
         break;
     case WM_DESTROY:
+        KillTimer(hwnd, COLD_START_TIMER_ID);
         UnregisterToggleHotkey(hwnd);
         RemoveTrayIcon();
         PostQuitMessage(0);
@@ -498,6 +510,39 @@ std::wstring GetProcessName(DWORD processId) {
         CloseHandle(hProcess);
     }
     return processName;
+}
+
+bool IsOutlookProcessName(const std::wstring& processName) {
+    return _wcsicmp(processName.c_str(), NEW_OUTLOOK_PROCESS_NAME) == 0 ||
+        _wcsicmp(processName.c_str(), CLASSIC_OUTLOOK_PROCESS_NAME) == 0;
+}
+
+bool IsAnyOutlookProcessRunning() {
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) {
+        return true;
+    }
+
+    PROCESSENTRY32 entry{};
+    entry.dwSize = sizeof(entry);
+    bool running = false;
+    if (Process32First(snapshot, &entry)) {
+        do {
+            if (IsOutlookProcessName(entry.szExeFile)) {
+                running = true;
+                break;
+            }
+        } while (Process32Next(snapshot, &entry));
+    }
+
+    CloseHandle(snapshot);
+    return running;
+}
+
+void UpdateColdStartArmedState() {
+    if (hideOnFirstOpen && !hideOnColdStartArmed && !IsAnyOutlookProcessRunning()) {
+        hideOnColdStartArmed = true;
+    }
 }
 
 std::wstring GetWindowClass(HWND window) {
@@ -598,9 +643,9 @@ bool TrackOutlookWindow(HWND window, bool allowInitialHide) {
     trackedWindowByProcess[processId] = window;
     trackedThreadByWindow[window] = threadId;
 
-    if (hideOnFirstOpen && allowInitialHide) {
+    if (hideOnColdStartArmed && allowInitialHide) {
         HideOrMinimizeOutlookWindow(window);
-        hideOnFirstOpen = false;
+        hideOnColdStartArmed = false;
     }
 
     return true;
@@ -674,6 +719,8 @@ void RemoveTrackedWindow(HWND window) {
             break;
         }
     }
+
+    UpdateColdStartArmedState();
 }
 
 BOOL CALLBACK EnumWindowsProc(HWND window, LPARAM lParam) {
@@ -787,6 +834,7 @@ int wmain(int argc, wchar_t* argv[]) {
 
     trayEnabled = options.trayEnabled;
     hideOnFirstOpen = options.hideOnFirstOpen;
+    hideOnColdStartArmed = hideOnFirstOpen && !IsAnyOutlookProcessRunning();
     hotkeyModifiers = options.hotkeyModifiers;
     hotkeyVirtualKey = options.hotkeyVirtualKey;
     hotkeyText = options.hotkeyText;
@@ -830,6 +878,9 @@ int wmain(int argc, wchar_t* argv[]) {
 
     if (trayEnabled) {
         CreateTrayIconMenu();
+    }
+    if (hideOnFirstOpen) {
+        SetTimer(hwnd, COLD_START_TIMER_ID, COLD_START_CHECK_MS, NULL);
     }
     InitializeOutlookHooks();
 

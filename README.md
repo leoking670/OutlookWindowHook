@@ -21,12 +21,6 @@ Download the x64 binary zip from the [Releases page](https://github.com/leoking6
 - Can start Outlook in the background after each cold start
 - Does not require administrator privileges
 
-## Classic Outlook Notes
-
-For classic Outlook, enable Outlook's own **Minimize to tray** setting first. This tool minimizes the classic Outlook main window instead of fully hiding it, so Outlook can continue to behave like a background tray app.
-
-While this tool is running, closing the classic Outlook main window is turned into minimize-to-tray behavior. To truly exit classic Outlook, use Outlook's own **Exit** command from its tray icon or terminate the `outlook.exe` process.
-
 ## Command Line
 
 ```powershell
@@ -58,29 +52,80 @@ Common examples:
 
 `--no-tray` only removes the tray icon. If you run a long-running command directly inside PowerShell or Windows Terminal, that terminal can remain attached. For daily use, start the app from a shortcut or script.
 
-## Shortcuts And Startup
+## Startup Options
 
-For tray mode, you can use the built-in startup option: run the app, right click the tray icon, and tick **Autostart**.
+⚠️**Important:** the tray menu's **Autostart** only starts `OlkWindowHook.exe` with no command-line options. It will not remember `--no-tray`, `--hotkey`, or `--start-hidden`.
 
-For custom options, create a Windows shortcut to `OlkWindowHook.exe`, open **Properties**, and add options after the quoted executable path:
+If you configure startup with custom options, first right click the tray icon and untick **Autostart**. Otherwise Windows may start a second, basic no-argument copy and it can look like your options are not working.
+
+Use one of the setup paths below.
+
+### Option 1: Shortcut With Arguments
+
+This is usually the easiest no-code method.
+
+1. Put the extracted release files somewhere stable, for example:
+
+```text
+C:\Users\YourName\Apps\OutlookWindowHook\
+```
+
+2. Make sure `OlkWindowHook.exe` and `OlkWindowHook.dll` are in that same folder.
+3. Right click `OlkWindowHook.exe` and choose **Create shortcut**.
+4. Right click the new shortcut and choose **Properties**.
+5. In **Target**, keep the exe path in quotes and add your options after it:
 
 ```text
 "C:\Path\To\OlkWindowHook.exe" --no-tray --start-hidden --hotkey Ctrl+Alt+O
 ```
 
-To run that shortcut after login, put it in the current user's Startup folder:
+6. Open the current user's Startup folder:
 
 ```powershell
 explorer shell:startup
 ```
 
-If you use `--start-hidden` at login, this tool must start before Outlook. You can use a startup order manager such as Startup Delayer, or create a `.ps1` file beside the executable:
+7. Move the shortcut into that Startup folder.
+8. Sign out and sign in again, or double click the shortcut once to test it.
+
+### Option 2: PowerShell Startup Script
+
+Use this when you want this tool to start first and Outlook to start a few seconds later.
+
+1. In the same folder as `OlkWindowHook.exe`, create a text file named:
+
+```text
+Start-OlkWindowHook.ps1
+```
+
+2. Paste this into the file:
 
 ```powershell
-Start-Process -FilePath "$PSScriptRoot\OlkWindowHook.exe" -ArgumentList "--no-tray --start-hidden --hotkey Ctrl+Alt+O" -WindowStyle Hidden
+$hook = Join-Path $PSScriptRoot "OlkWindowHook.exe"
+Start-Process -FilePath $hook -ArgumentList "--no-tray --start-hidden --hotkey Ctrl+Alt+O" -WindowStyle Hidden
 Start-Sleep -Seconds 5
 Start-Process -FilePath "outlook.exe"
 ```
+
+3. The `Start-Sleep` line gives this tool time to start before Outlook. Increase `5` if Outlook still opens too early.
+4. Create a shortcut with this target:
+
+```text
+powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Path\To\Start-OlkWindowHook.ps1"
+```
+
+5. Open the Startup folder with `explorer shell:startup` and move that shortcut into it.
+6. Sign out and sign in again to test it.
+
+### Option 3: Startup Delayer
+
+You can also use a startup order manager such as Startup Delayer: start Outlook Window Hook first, then delay Outlook by a few seconds. This is useful when Outlook already starts automatically through another app or policy.
+
+## Classic Outlook Notes
+
+For classic Outlook, enable Outlook's own **Minimize to tray** setting first. This tool minimizes the classic Outlook main window instead of fully hiding it, so Outlook can continue to behave like a background tray app.
+
+While this tool is running, closing the classic Outlook main window is turned into minimize-to-tray behavior. To truly exit classic Outlook, use Outlook's own **Exit** command from its tray icon or terminate the `outlook.exe` process.
 
 ## How It Works
 

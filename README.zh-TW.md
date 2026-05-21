@@ -21,12 +21,6 @@
 - 可讓 Outlook 每次冷啟動後從背景啟動
 - 不需要系統管理員權限
 
-## Classic Outlook 注意事項
-
-若使用 Classic Outlook，請先在 Outlook 自身設定中啟用 **最小化到系統匣**。本工具對 Classic Outlook 採用「最小化主視窗」而不是完全隱藏，這樣 Outlook 才能維持類似背景常駐程式的行為。
-
-本工具執行期間，關閉 Classic Outlook 主視窗的動作會被轉成最小化到系統匣。因此若要真正結束 Classic Outlook，請使用 Outlook 系統匣圖示中的 **Exit**，或手動結束 `outlook.exe` 行程。
-
 ## 命令列
 
 ```powershell
@@ -58,29 +52,80 @@
 
 `--no-tray` 只是不顯示系統匣圖示。如果你直接在 PowerShell 或 Windows Terminal 中執行長駐模式，該終端機可能會一直被占用。日常使用建議透過捷徑或腳本啟動。
 
-## 捷徑與開機啟動
+## 開機啟動方式
 
-若使用系統匣模式，可直接使用內建開機啟動選項：執行程式後，在系統匣圖示按右鍵並勾選 **Autostart**。
+**重要：** 系統匣選單中的 **Autostart** 只會啟動不帶參數的 `OlkWindowHook.exe`。它不會記住 `--no-tray`、`--hotkey` 或 `--start-hidden`。
 
-若要使用自訂參數，請建立指向 `OlkWindowHook.exe` 的 Windows 捷徑，開啟 **內容**，並在加上引號的 exe 路徑後面加入參數：
+如果你要設定帶參數的開機啟動，請先在系統匣圖示上按右鍵，取消勾選 **Autostart**。否則 Windows 可能會另外啟動一個無參數的基本版本，看起來就像你的參數沒有生效。
+
+請使用下面任一方式設定。
+
+### 方式一：帶參數的捷徑
+
+這通常是最簡單、不需要寫程式的方法。
+
+1. 把解壓縮後的檔案放在固定位置，例如：
+
+```text
+C:\Users\YourName\Apps\OutlookWindowHook\
+```
+
+2. 確認 `OlkWindowHook.exe` 和 `OlkWindowHook.dll` 在同一個資料夾。
+3. 在 `OlkWindowHook.exe` 上按右鍵，選擇 **建立捷徑**。
+4. 在新捷徑上按右鍵，選擇 **內容**。
+5. 在 **目標** 欄位保留加上引號的 exe 路徑，並在後面加入參數：
 
 ```text
 "C:\Path\To\OlkWindowHook.exe" --no-tray --start-hidden --hotkey Ctrl+Alt+O
 ```
 
-若希望登入後自動執行，請把捷徑放入目前使用者的啟動資料夾：
+6. 開啟目前使用者的啟動資料夾：
 
 ```powershell
 explorer shell:startup
 ```
 
-若登入後要使用 `--start-hidden`，本工具必須先於 Outlook 啟動。你可以使用 Startup Delayer 這類啟動順序管理工具，也可以在 exe 同一個資料夾建立 `.ps1` 檔案：
+7. 把捷徑移到這個啟動資料夾。
+8. 登出再登入，或先雙擊捷徑測試一次。
+
+### 方式二：PowerShell 啟動腳本
+
+如果你希望本工具先啟動，Outlook 幾秒後再啟動，請使用這種方式。
+
+1. 在 `OlkWindowHook.exe` 同一個資料夾建立文字檔，命名為：
+
+```text
+Start-OlkWindowHook.ps1
+```
+
+2. 把下面內容貼進檔案：
 
 ```powershell
-Start-Process -FilePath "$PSScriptRoot\OlkWindowHook.exe" -ArgumentList "--no-tray --start-hidden --hotkey Ctrl+Alt+O" -WindowStyle Hidden
+$hook = Join-Path $PSScriptRoot "OlkWindowHook.exe"
+Start-Process -FilePath $hook -ArgumentList "--no-tray --start-hidden --hotkey Ctrl+Alt+O" -WindowStyle Hidden
 Start-Sleep -Seconds 5
 Start-Process -FilePath "outlook.exe"
 ```
+
+3. `Start-Sleep` 會讓 Outlook 延後啟動，給本工具一點準備時間。如果 Outlook 還是太早打開，可以把 `5` 改大。
+4. 建立一個捷徑，目標填入：
+
+```text
+powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Path\To\Start-OlkWindowHook.ps1"
+```
+
+5. 用 `explorer shell:startup` 開啟啟動資料夾，把這個捷徑移進去。
+6. 登出再登入測試。
+
+### 方式三：Startup Delayer
+
+你也可以使用 Startup Delayer 這類啟動順序管理工具：先啟動 Outlook Window Hook，再讓 Outlook 延後幾秒啟動。當 Outlook 已經由其他程式或公司政策自動啟動時，這種方式比較方便。
+
+## Classic Outlook 注意事項
+
+若使用 Classic Outlook，請先在 Outlook 自身設定中啟用 **最小化到系統匣**。本工具對 Classic Outlook 採用「最小化主視窗」而不是完全隱藏，這樣 Outlook 才能維持類似背景常駐程式的行為。
+
+本工具執行期間，關閉 Classic Outlook 主視窗的動作會被轉成最小化到系統匣。因此若要真正結束 Classic Outlook，請使用 Outlook 系統匣圖示中的 **Exit**，或手動結束 `outlook.exe` 行程。
 
 ## 工作原理
 

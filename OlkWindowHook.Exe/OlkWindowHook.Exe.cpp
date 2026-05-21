@@ -40,6 +40,8 @@
 constexpr wchar_t APP_NAME[] = L"Outlook Window Hook";
 constexpr wchar_t GITHUB_URL[] = L"https://github.com/leoking670/OutlookWindowHook";
 constexpr wchar_t NEW_OUTLOOK_PROCESS_NAME[] = L"olk.exe";
+constexpr wchar_t NEW_OUTLOOK_MAIN_WINDOW_CLASS[] = L"Outlook Host";
+constexpr wchar_t NEW_OUTLOOK_WEBVIEW_WINDOW_CLASS[] = L"Chrome_WidgetWin_0";
 constexpr wchar_t CLASSIC_OUTLOOK_PROCESS_NAME[] = L"outlook.exe";
 constexpr wchar_t CLASSIC_OUTLOOK_MAIN_WINDOW_CLASS[] = L"rctrl_renwnd32";
 constexpr wchar_t TARGET_WINDOW_PROP[] = L"OlkWindowHook.TargetWindow";
@@ -551,27 +553,56 @@ std::wstring GetWindowClass(HWND window) {
     return className;
 }
 
-bool IsTargetOutlookWindow(HWND window) {
-    if (!IsWindow(window) || !IsWindowVisible(window) || GetAncestor(window, GA_ROOT) != window || GetWindow(window, GW_OWNER)) {
-        return false;
-    }
+bool IsRootUnownedWindow(HWND window) {
+    return IsWindow(window) && GetAncestor(window, GA_ROOT) == window && !GetWindow(window, GW_OWNER);
+}
 
+bool IsWindowFromProcess(HWND window, const wchar_t* processName) {
     DWORD processId = 0;
     GetWindowThreadProcessId(window, &processId);
     if (!processId) {
         return false;
     }
 
-    std::wstring processName = GetProcessName(processId);
-    if (_wcsicmp(processName.c_str(), NEW_OUTLOOK_PROCESS_NAME) == 0) {
-        return true;
-    }
+    return _wcsicmp(GetProcessName(processId).c_str(), processName) == 0;
+}
 
-    if (_wcsicmp(processName.c_str(), CLASSIC_OUTLOOK_PROCESS_NAME) != 0) {
+bool IsNewOutlookHostWindow(HWND window) {
+    return IsRootUnownedWindow(window) &&
+        IsWindowFromProcess(window, NEW_OUTLOOK_PROCESS_NAME) &&
+        _wcsicmp(GetWindowClass(window).c_str(), NEW_OUTLOOK_MAIN_WINDOW_CLASS) == 0;
+}
+
+bool HasRealSize(HWND window) {
+    RECT rect{};
+    return GetWindowRect(window, &rect) &&
+        (rect.right - rect.left) > 100 &&
+        (rect.bottom - rect.top) > 100;
+}
+
+bool IsNewOutlookWebViewWindow(HWND window, HWND& hostWindow) {
+    hostWindow = GetAncestor(window, GA_ROOT);
+    return IsNewOutlookHostWindow(hostWindow) &&
+        _wcsicmp(GetWindowClass(window).c_str(), NEW_OUTLOOK_WEBVIEW_WINDOW_CLASS) == 0 &&
+        HasRealSize(window);
+}
+
+bool IsClassicOutlookMainWindow(HWND window) {
+    return IsRootUnownedWindow(window) &&
+        IsWindowFromProcess(window, CLASSIC_OUTLOOK_PROCESS_NAME) &&
+        _wcsicmp(GetWindowClass(window).c_str(), CLASSIC_OUTLOOK_MAIN_WINDOW_CLASS) == 0;
+}
+
+bool IsTargetOutlookWindow(HWND window) {
+    if (!IsRootUnownedWindow(window)) {
         return false;
     }
 
-    return _wcsicmp(GetWindowClass(window).c_str(), CLASSIC_OUTLOOK_MAIN_WINDOW_CLASS) == 0;
+    if (IsNewOutlookHostWindow(window)) {
+        return true;
+    }
+
+    return IsClassicOutlookMainWindow(window);
 }
 
 bool IsClassicOutlookWindow(HWND window) {
@@ -589,16 +620,38 @@ void HideOrMinimizeOutlookWindow(HWND window) {
         ShowWindow(window, SW_MINIMIZE);
     }
     else {
-        ShowWindow(window, SW_HIDE);
+        ShowWindowAsync(window, SW_HIDE);
     }
 }
 
-bool TrackOutlookWindow(HWND window, bool allowInitialHide) {
-    if (!SetHookForThread || !IsTargetOutlookWindow(window)) {
-        return false;
+void HideColdStartWindow(HWND window) {
+    if (!hideOnColdStartArmed || !IsWindowVisible(window) || IsIconic(window)) {
+        return;
     }
 
-    if (!IsWindowVisible(window)) {
+    if (IsNewOutlookHostWindow(window)) {
+        ShowWindowAsync(window, SW_HIDE);
+        hideOnColdStartArmed = false;
+    }
+    else if (IsClassicOutlookMainWindow(window)) {
+        ShowWindow(window, SW_MINIMIZE);
+        hideOnColdStartArmed = false;
+    }
+}
+
+void HideColdStartWindowAfterWebViewReady(HWND window) {
+    if (!hideOnColdStartArmed) {
+        return;
+    }
+
+    HWND hostWindow = NULL;
+    if (IsNewOutlookWebViewWindow(window, hostWindow)) {
+        HideColdStartWindow(hostWindow);
+    }
+}
+
+bool TrackOutlookWindow(HWND window) {
+    if (!SetHookForThread || !IsTargetOutlookWindow(window)) {
         return false;
     }
 
@@ -642,11 +695,6 @@ bool TrackOutlookWindow(HWND window, bool allowInitialHide) {
     trackedWindows.insert(window);
     trackedWindowByProcess[processId] = window;
     trackedThreadByWindow[window] = threadId;
-
-    if (hideOnColdStartArmed && allowInitialHide) {
-        HideOrMinimizeOutlookWindow(window);
-        hideOnColdStartArmed = false;
-    }
 
     return true;
 }
@@ -724,7 +772,7 @@ void RemoveTrackedWindow(HWND window) {
 }
 
 BOOL CALLBACK EnumWindowsProc(HWND window, LPARAM lParam) {
-    TrackOutlookWindow(window, lParam != 0);
+    TrackOutlookWindow(window);
     return TRUE;
 }
 
@@ -733,8 +781,16 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hook, DWORD event, HWND window, LONG id
         return;
     }
 
-    if (event == EVENT_OBJECT_CREATE || event == EVENT_OBJECT_SHOW) {
-        TrackOutlookWindow(window, true);
+    if (event == EVENT_OBJECT_SHOW || event == EVENT_OBJECT_LOCATIONCHANGE) {
+        HideColdStartWindowAfterWebViewReady(window);
+        if (event == EVENT_OBJECT_SHOW && IsClassicOutlookMainWindow(window)) {
+            HideColdStartWindow(window);
+        }
+        TrackOutlookWindow(window);
+    }
+    else if (event == EVENT_OBJECT_CREATE) {
+        HideColdStartWindowAfterWebViewReady(window);
+        TrackOutlookWindow(window);
     }
     else if (event == EVENT_OBJECT_DESTROY) {
         RemoveTrackedWindow(window);
@@ -772,7 +828,7 @@ void InitializeOutlookHooks() {
 
     hCreateWindowEventHook = SetWinEventHook(
         EVENT_OBJECT_CREATE,
-        EVENT_OBJECT_SHOW,
+        EVENT_OBJECT_LOCATIONCHANGE,
         NULL,
         WinEventProc,
         0,

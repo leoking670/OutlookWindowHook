@@ -71,7 +71,6 @@ enum class OneShotCommand {
 struct CommandOptions {
     bool trayEnabled = true;
     bool startHidden = false;
-    bool hotkeyEnabled = false;
     UINT hotkeyModifiers = 0;
     UINT hotkeyVirtualKey = 0;
     std::wstring hotkeyText;
@@ -208,6 +207,17 @@ bool ParseHotkey(const std::wstring& text, UINT& modifiers, UINT& virtualKey) {
     return modifiers != 0 && virtualKey != 0;
 }
 
+bool SetHotkeyOption(CommandOptions& options, const std::wstring& hotkeyArg) {
+    if (!ParseHotkey(hotkeyArg, options.hotkeyModifiers, options.hotkeyVirtualKey)) {
+        options.parseError = L"Invalid hotkey. Use modifiers plus one key, for example Ctrl+Alt+O.";
+        options.parseExitCode = 2;
+        return false;
+    }
+
+    options.hotkeyText = hotkeyArg;
+    return true;
+}
+
 CommandOptions ParseCommandLine(int argc, wchar_t* argv[]) {
     CommandOptions options;
 
@@ -227,23 +237,15 @@ CommandOptions ParseCommandLine(int argc, wchar_t* argv[]) {
             }
 
             std::wstring hotkeyArg = argv[++i];
-            if (!ParseHotkey(hotkeyArg, options.hotkeyModifiers, options.hotkeyVirtualKey)) {
-                options.parseError = L"Invalid hotkey. Use modifiers plus one key, for example Ctrl+Alt+O.";
-                options.parseExitCode = 2;
+            if (!SetHotkeyOption(options, hotkeyArg)) {
                 continue;
             }
-            options.hotkeyEnabled = true;
-            options.hotkeyText = hotkeyArg;
         }
         else if (arg.rfind(L"--hotkey=", 0) == 0) {
             std::wstring hotkeyArg = arg.substr(9);
-            if (!ParseHotkey(hotkeyArg, options.hotkeyModifiers, options.hotkeyVirtualKey)) {
-                options.parseError = L"Invalid hotkey. Use modifiers plus one key, for example Ctrl+Alt+O.";
-                options.parseExitCode = 2;
+            if (!SetHotkeyOption(options, hotkeyArg)) {
                 continue;
             }
-            options.hotkeyEnabled = true;
-            options.hotkeyText = hotkeyArg;
         }
         else if (IsArg(arg, L"--status")) {
             SetOneShotCommand(options, OneShotCommand::Status);
@@ -593,15 +595,7 @@ bool IsClassicOutlookMainWindow(HWND window) {
 }
 
 bool IsTargetOutlookWindow(HWND window) {
-    if (!IsRootUnownedWindow(window)) {
-        return false;
-    }
-
-    if (IsNewOutlookHostWindow(window)) {
-        return true;
-    }
-
-    return IsClassicOutlookMainWindow(window);
+    return IsNewOutlookHostWindow(window) || IsClassicOutlookMainWindow(window);
 }
 
 bool IsClassicOutlookWindow(HWND window) {
@@ -780,20 +774,20 @@ void CALLBACK WinEventProc(HWINEVENTHOOK hook, DWORD event, HWND window, LONG id
         return;
     }
 
-    if (event == EVENT_OBJECT_SHOW || event == EVENT_OBJECT_LOCATIONCHANGE) {
-        HideColdStartWindowAfterWebViewReady(window);
-        if (event == EVENT_OBJECT_SHOW && IsClassicOutlookMainWindow(window)) {
-            HideColdStartWindow(window);
-        }
-        TrackOutlookWindow(window);
-    }
-    else if (event == EVENT_OBJECT_CREATE) {
-        HideColdStartWindowAfterWebViewReady(window);
-        TrackOutlookWindow(window);
-    }
-    else if (event == EVENT_OBJECT_DESTROY) {
+    if (event == EVENT_OBJECT_DESTROY) {
         RemoveTrackedWindow(window);
+        return;
     }
+
+    if (event != EVENT_OBJECT_CREATE && event != EVENT_OBJECT_SHOW && event != EVENT_OBJECT_LOCATIONCHANGE) {
+        return;
+    }
+
+    HideColdStartWindowAfterWebViewReady(window);
+    if (event == EVENT_OBJECT_SHOW && IsClassicOutlookMainWindow(window)) {
+        HideColdStartWindow(window);
+    }
+    TrackOutlookWindow(window);
 }
 
 void InitializeOutlookHooks() {

@@ -10,29 +10,28 @@ Traditional Chinese documentation for Taiwan users: [README.zh-TW.md](README.zh-
 
 ## Download
 
-Download the x64 binary zip from the [Releases page](https://github.com/leoking670/OutlookWindowHook/releases). Extract the zip and keep `OlkWindowHook.dll` in the same directory as `OlkWindowHook.exe`.
+Download the x64 binary zip from the [Releases page](https://github.com/leoking670/OutlookWindowHook/releases). Extract it and keep `OlkWindowHook.dll` in the same directory as `OlkWindowHook.exe`.
 
-## Features
+## What It Does
 
-- Option to add to Startup (after running, right click the system tray icon and tick Autostart)
-- No need for admin privileges
-- Optional command-line control for background/no-tray usage
-- Optional global hotkey to show or hide the Outlook main window
-- Optional hidden cold-start mode
+- Keeps Outlook running when the main window is closed
+- Supports new Outlook and basic classic Outlook main-window handling
+- Can run with or without a tray icon
+- Can register a global hotkey to show or hide Outlook
+- Can start Outlook in the background after each cold start
+- Does not require administrator privileges
 
 ## Classic Outlook Notes
 
-For classic Outlook, enable Outlook's own **Minimize to tray** setting first. This tool minimizes the classic Outlook main window instead of fully hiding it, so that Outlook can continue to behave like a background tray app.
+For classic Outlook, enable Outlook's own **Minimize to tray** setting first. This tool minimizes the classic Outlook main window instead of fully hiding it, so Outlook can continue to behave like a background tray app.
 
-While this tool is running, closing the classic Outlook main window is intercepted and turned into minimize-to-tray behavior. To truly exit classic Outlook, use Outlook's own **Exit** command from its tray icon or terminate the `outlook.exe` process.
+While this tool is running, closing the classic Outlook main window is turned into minimize-to-tray behavior. To truly exit classic Outlook, use Outlook's own **Exit** command from its tray icon or terminate the `outlook.exe` process.
 
 ## Command Line
 
 ```powershell
 .\OlkWindowHook.exe [options]
 ```
-
-Options:
 
 | Option | Description |
 | --- | --- |
@@ -47,7 +46,7 @@ Options:
 
 `--hotkey` supports `Ctrl`, `Alt`, `Shift`, and `Win` modifiers with one `A-Z`, `0-9`, or `F1-F24` key. The hotkey and hidden cold-start options are only enabled when explicitly passed on the command line.
 
-Common combinations:
+Common examples:
 
 ```powershell
 # No tray icon, use Ctrl+Alt+O to show or hide Outlook
@@ -57,56 +56,44 @@ Common combinations:
 .\OlkWindowHook.exe --no-tray --start-hidden --hotkey Ctrl+Alt+O
 ```
 
-`--no-tray` only removes the tray icon. It does not make the process a Windows GUI subsystem app. If you run it directly inside PowerShell or Windows Terminal, that terminal can remain attached while the app is running. For daily use, start it from a shortcut or a small script instead of typing the long-running command in an interactive terminal.
+`--no-tray` only removes the tray icon. If you run a long-running command directly inside PowerShell or Windows Terminal, that terminal can remain attached. For daily use, start the app from a shortcut or script.
 
 ## Shortcuts And Startup
 
-To create a shortcut with options:
+For tray mode, you can use the built-in startup option: run the app, right click the tray icon, and tick **Autostart**.
 
-1. Right click `OlkWindowHook.exe` and choose **Create shortcut**.
-2. Right click the shortcut and choose **Properties**.
-3. In **Target**, keep the executable path in quotes and add options after it:
+For custom options, create a Windows shortcut to `OlkWindowHook.exe`, open **Properties**, and add options after the quoted executable path:
 
 ```text
 "C:\Path\To\OlkWindowHook.exe" --no-tray --start-hidden --hotkey Ctrl+Alt+O
 ```
 
-4. Use that shortcut to start the app. Put the shortcut in the Windows Startup folder if you want it to run after login.
-
-Open the current user's Startup folder:
+To run that shortcut after login, put it in the current user's Startup folder:
 
 ```powershell
 explorer shell:startup
 ```
 
-You can also use a PowerShell script. Create a `.ps1` file beside the executable:
+If you use `--start-hidden` at login, this tool must start before Outlook. You can use a startup order manager such as Startup Delayer, or create a `.ps1` file beside the executable:
 
 ```powershell
 Start-Process -FilePath "$PSScriptRoot\OlkWindowHook.exe" -ArgumentList "--no-tray --start-hidden --hotkey Ctrl+Alt+O" -WindowStyle Hidden
+Start-Sleep -Seconds 5
+Start-Process -FilePath "outlook.exe"
 ```
 
-Run the script from a shortcut with:
+## How It Works
 
-```text
-powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Path\To\Start-OlkWindowHook.ps1"
-```
-
-For a one-line shortcut without a script, use:
-
-```text
-powershell.exe -WindowStyle Hidden -Command "Start-Process -FilePath 'C:\Path\To\OlkWindowHook.exe' -ArgumentList '--no-tray --start-hidden --hotkey Ctrl+Alt+O' -WindowStyle Hidden"
-```
-
-## How it works
-
-1. Watches for supported top-level Outlook main windows created by `olk.exe` or `outlook.exe`
-2. Installs a `WH_CALLWNDPROC` hook only on the Outlook window thread
-3. Intercepts the tracked window's `WM_CLOSE` event and hides new Outlook or minimizes classic Outlook
-4. Optionally registers a global hotkey to show or hide the tracked Outlook main window
+1. Uses WinEvent notifications to find supported Outlook main windows from `olk.exe` and `outlook.exe`
+2. Tracks new Outlook and classic Outlook separately, including separate cold-start state
+3. Installs a `WH_CALLWNDPROC` hook only on the Outlook window thread being tracked
+4. Intercepts `WM_CLOSE`: new Outlook is hidden, classic Outlook is minimized
+5. For `--start-hidden`, new Outlook is hidden after its WebView child is ready; classic Outlook is minimized when its main window appears
+6. If a hotkey is configured, it controls the foreground Outlook type first, then falls back to the most recently tracked Outlook window
 
 ## Building
 
-Build `Release|x64` with Visual Studio 2022 or MSBuild. Releases are distributed as a zip containing `OlkWindowHook.exe`, `OlkWindowHook.dll`, `LICENSE`, and `README.md`; MSI installer builds are no longer provided.
+Build `Release|x64` with Visual Studio 2022 or MSBuild. Releases are distributed as a zip containing `OlkWindowHook.exe`, `OlkWindowHook.dll`, `LICENSE`, and README files; MSI installer builds are no longer provided.
 
 ## Licence
 

@@ -14,25 +14,24 @@
 
 ## 功能
 
-- 可加入開機啟動：程式執行後，在系統匣圖示上按右鍵並勾選 Autostart
+- 關閉 Outlook 主視窗後，讓 Outlook 繼續在背景執行
+- 支援新版 Outlook，並提供 Classic Outlook 主視窗的基本處理
+- 可選擇顯示或不顯示系統匣圖示
+- 可設定全域熱鍵，用來顯示或隱藏 Outlook
+- 可讓 Outlook 每次冷啟動後從背景啟動
 - 不需要系統管理員權限
-- 支援命令列控制，方便背景執行或無系統匣圖示使用
-- 可設定全域熱鍵，用來顯示或隱藏 Outlook 主視窗
-- 可選擇冷啟動時讓 Outlook 從背景啟動
 
 ## Classic Outlook 注意事項
 
 若使用 Classic Outlook，請先在 Outlook 自身設定中啟用 **最小化到系統匣**。本工具對 Classic Outlook 採用「最小化主視窗」而不是完全隱藏，這樣 Outlook 才能維持類似背景常駐程式的行為。
 
-本工具執行期間，關閉 Classic Outlook 主視窗的動作會被攔截並轉為最小化到系統匣。因此若要真正結束 Classic Outlook，請使用 Outlook 系統匣圖示中的 **Exit**，或手動結束 `outlook.exe` 行程。
+本工具執行期間，關閉 Classic Outlook 主視窗的動作會被轉成最小化到系統匣。因此若要真正結束 Classic Outlook，請使用 Outlook 系統匣圖示中的 **Exit**，或手動結束 `outlook.exe` 行程。
 
 ## 命令列
 
 ```powershell
 .\OlkWindowHook.exe [options]
 ```
-
-選項：
 
 | 選項 | 說明 |
 | --- | --- |
@@ -47,7 +46,7 @@
 
 `--hotkey` 支援 `Ctrl`、`Alt`、`Shift`、`Win` 修飾鍵，搭配一個 `A-Z`、`0-9` 或 `F1-F24` 按鍵。熱鍵與冷啟動背景模式只有在命令列明確傳入時才會啟用。
 
-常見組合：
+常見範例：
 
 ```powershell
 # 不顯示系統匣圖示，使用 Ctrl+Alt+O 顯示或隱藏 Outlook
@@ -57,52 +56,40 @@
 .\OlkWindowHook.exe --no-tray --start-hidden --hotkey Ctrl+Alt+O
 ```
 
-`--no-tray` 只是不顯示系統匣圖示，並不會把程式變成真正的 Windows GUI subsystem app。如果你直接在 PowerShell 或 Windows Terminal 中執行長駐模式，該終端機可能會一直被占用。日常使用建議透過捷徑或簡短腳本啟動，不要在互動式終端機中直接輸入長駐命令。
+`--no-tray` 只是不顯示系統匣圖示。如果你直接在 PowerShell 或 Windows Terminal 中執行長駐模式，該終端機可能會一直被占用。日常使用建議透過捷徑或腳本啟動。
 
 ## 捷徑與開機啟動
 
-建立帶參數的捷徑：
+若使用系統匣模式，可直接使用內建開機啟動選項：執行程式後，在系統匣圖示按右鍵並勾選 **Autostart**。
 
-1. 在 `OlkWindowHook.exe` 上按右鍵，選擇 **建立捷徑**。
-2. 在捷徑上按右鍵，選擇 **內容**。
-3. 在 **目標** 欄位中保留 exe 路徑的引號，並在後面加上參數：
+若要使用自訂參數，請建立指向 `OlkWindowHook.exe` 的 Windows 捷徑，開啟 **內容**，並在加上引號的 exe 路徑後面加入參數：
 
 ```text
 "C:\Path\To\OlkWindowHook.exe" --no-tray --start-hidden --hotkey Ctrl+Alt+O
 ```
 
-4. 使用該捷徑啟動工具。如果希望登入 Windows 後自動執行，可將捷徑放入目前使用者的啟動資料夾。
-
-開啟目前使用者的啟動資料夾：
+若希望登入後自動執行，請把捷徑放入目前使用者的啟動資料夾：
 
 ```powershell
 explorer shell:startup
 ```
 
-也可以使用 PowerShell 腳本。請在 exe 同一個資料夾建立 `.ps1` 檔案：
+若登入後要使用 `--start-hidden`，本工具必須先於 Outlook 啟動。你可以使用 Startup Delayer 這類啟動順序管理工具，也可以在 exe 同一個資料夾建立 `.ps1` 檔案：
 
 ```powershell
 Start-Process -FilePath "$PSScriptRoot\OlkWindowHook.exe" -ArgumentList "--no-tray --start-hidden --hotkey Ctrl+Alt+O" -WindowStyle Hidden
-```
-
-從捷徑執行該腳本：
-
-```text
-powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Path\To\Start-OlkWindowHook.ps1"
-```
-
-若不想建立腳本，也可以使用單行捷徑：
-
-```text
-powershell.exe -WindowStyle Hidden -Command "Start-Process -FilePath 'C:\Path\To\OlkWindowHook.exe' -ArgumentList '--no-tray --start-hidden --hotkey Ctrl+Alt+O' -WindowStyle Hidden"
+Start-Sleep -Seconds 5
+Start-Process -FilePath "outlook.exe"
 ```
 
 ## 工作原理
 
-1. 監看由 `olk.exe` 或 `outlook.exe` 建立的受支援頂層 Outlook 主視窗
-2. 僅針對 Outlook 視窗所在的 thread 安裝 `WH_CALLWNDPROC` hook
-3. 攔截被追蹤視窗的 `WM_CLOSE` 事件，對新版 Outlook 執行隱藏，對 Classic Outlook 執行最小化
-4. 可選擇註冊全域熱鍵，用來顯示或隱藏被追蹤的 Outlook 主視窗
+1. 使用 WinEvent 通知尋找由 `olk.exe` 或 `outlook.exe` 建立的受支援 Outlook 主視窗
+2. 分別追蹤新版 Outlook 和 Classic Outlook，包含各自獨立的冷啟動狀態
+3. 僅針對被追蹤 Outlook 視窗所在的 thread 安裝 `WH_CALLWNDPROC` hook
+4. 攔截 `WM_CLOSE`：新版 Outlook 會被隱藏，Classic Outlook 會被最小化
+5. 使用 `--start-hidden` 時，新版 Outlook 會在 WebView 子視窗準備好後隱藏；Classic Outlook 則在主視窗出現時最小化
+6. 若設定熱鍵，會優先控制目前前景中的 Outlook 類型，否則控制最近追蹤到的 Outlook 主視窗
 
 ## 建置
 

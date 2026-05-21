@@ -1,12 +1,12 @@
 # Outlook Window Hook
 
+[English](README.md) | [繁體中文](README.zh-TW.md)
+
 Keeps Outlook running in the background when the main window is closed, similar to Teams.
 
 Supports the new Outlook client (`olk.exe`) and basic main-window handling for classic Outlook (`outlook.exe`).
 
 Maintained fork by [leoking670](https://github.com/leoking670), developed with assistance from OpenAI Codex. Original project by [Oliver Dalton / Palsternakka](https://github.com/Palsternakka/OutlookWindowHook).
-
-Traditional Chinese documentation for Taiwan users: [README.zh-TW.md](README.zh-TW.md)
 
 ## Download
 

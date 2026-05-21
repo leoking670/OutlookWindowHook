@@ -1,12 +1,12 @@
 # Outlook Window Hook
 
+[English](README.md) | [繁體中文](README.zh-TW.md)
+
 讓 Outlook 主視窗關閉後仍可在背景執行，行為類似 Teams。
 
 支援新版 Outlook 用戶端 (`olk.exe`)，並提供 Classic Outlook (`outlook.exe`) 主視窗的基本處理。
 
 這是由 [leoking670](https://github.com/leoking670) 維護的 fork，並由 OpenAI Codex 輔助開發。原始專案作者為 [Oliver Dalton / Palsternakka](https://github.com/Palsternakka/OutlookWindowHook)。
-
-英文文件請見 [README.md](README.md)。
 
 ## 下載
 

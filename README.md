@@ -18,22 +18,76 @@ Download the x64 binary zip from the [Releases page](https://github.com/leoking6
 - Optional global hotkey to show or hide the Outlook main window
 - Optional hidden cold-start mode
 
-## Command line
+## Command Line
 
 ```powershell
-OlkWindowHook.exe              # Start with tray icon
-OlkWindowHook.exe --no-tray    # Start in background without tray icon
-OlkWindowHook.exe --hotkey Ctrl+Alt+O
-                              # Toggle the Outlook main window with a global hotkey
-OlkWindowHook.exe --start-hidden
-                              # Start Outlook in the background after each cold start
-OlkWindowHook.exe --status     # Print whether the app is running
-OlkWindowHook.exe --exit       # Stop the running instance
-OlkWindowHook.exe --version    # Print version
-OlkWindowHook.exe --help       # Print usage
+.\OlkWindowHook.exe [options]
 ```
 
+Options:
+
+| Option | Description |
+| --- | --- |
+| none | Start with tray icon. |
+| `--no-tray` | Start without tray icon. |
+| `--hotkey Ctrl+Alt+O` | Toggle the Outlook main window with a global hotkey. |
+| `--start-hidden` | Start Outlook in the background after each cold start. |
+| `--status` | Print whether the app is running. |
+| `--exit` | Stop the running instance. |
+| `--version` | Print version. |
+| `--help` | Print usage. |
+
 `--hotkey` supports `Ctrl`, `Alt`, `Shift`, and `Win` modifiers with one `A-Z`, `0-9`, or `F1-F24` key. The hotkey and hidden cold-start options are only enabled when explicitly passed on the command line.
+
+Common combinations:
+
+```powershell
+# No tray icon, use Ctrl+Alt+O to show or hide Outlook
+.\OlkWindowHook.exe --no-tray --hotkey Ctrl+Alt+O
+
+# No tray icon, start Outlook hidden after cold start, use Ctrl+Alt+O to show it
+.\OlkWindowHook.exe --no-tray --start-hidden --hotkey Ctrl+Alt+O
+```
+
+`--no-tray` only removes the tray icon. It does not make the process a Windows GUI subsystem app. If you run it directly inside PowerShell or Windows Terminal, that terminal can remain attached while the app is running. For daily use, start it from a shortcut or a small script instead of typing the long-running command in an interactive terminal.
+
+## Shortcuts And Startup
+
+To create a shortcut with options:
+
+1. Right click `OlkWindowHook.exe` and choose **Create shortcut**.
+2. Right click the shortcut and choose **Properties**.
+3. In **Target**, keep the executable path in quotes and add options after it:
+
+```text
+"C:\Path\To\OlkWindowHook.exe" --no-tray --start-hidden --hotkey Ctrl+Alt+O
+```
+
+4. Use that shortcut to start the app. Put the shortcut in the Windows Startup folder if you want it to run after login.
+
+Open the current user's Startup folder:
+
+```powershell
+explorer shell:startup
+```
+
+You can also use a PowerShell script. Create a `.ps1` file beside the executable:
+
+```powershell
+Start-Process -FilePath "$PSScriptRoot\OlkWindowHook.exe" -ArgumentList "--no-tray --start-hidden --hotkey Ctrl+Alt+O" -WindowStyle Hidden
+```
+
+Run the script from a shortcut with:
+
+```text
+powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Path\To\Start-OlkWindowHook.ps1"
+```
+
+For a one-line shortcut without a script, use:
+
+```text
+powershell.exe -WindowStyle Hidden -Command "Start-Process -FilePath 'C:\Path\To\OlkWindowHook.exe' -ArgumentList '--no-tray --start-hidden --hotkey Ctrl+Alt+O' -WindowStyle Hidden"
+```
 
 ## How it works
 

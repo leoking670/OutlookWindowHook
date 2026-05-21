@@ -120,17 +120,16 @@ void PrintLine(const wchar_t* message) {
 void PrintHelp() {
     wprintf(L"%s %s\n", APP_NAME, APP_VERSION);
     PrintLine(L"");
-    PrintLine(L"Usage:");
-    PrintLine(L"  OlkWindowHook.exe              Start with tray icon");
-    PrintLine(L"  OlkWindowHook.exe --no-tray    Start in background without tray icon");
-    PrintLine(L"  OlkWindowHook.exe --hotkey Ctrl+Alt+O");
-    PrintLine(L"                                 Toggle the Outlook main window");
-    PrintLine(L"  OlkWindowHook.exe --start-hidden");
-    PrintLine(L"                                 Start Outlook in the background after each cold start");
-    PrintLine(L"  OlkWindowHook.exe --status     Show whether the app is running");
-    PrintLine(L"  OlkWindowHook.exe --exit       Stop the running instance");
-    PrintLine(L"  OlkWindowHook.exe --version    Show version");
-    PrintLine(L"  OlkWindowHook.exe --help       Show this help");
+    PrintLine(L"Usage: OlkWindowHook.exe [options]");
+    PrintLine(L"");
+    PrintLine(L"Options:");
+    PrintLine(L"  --no-tray                 Start without tray icon");
+    PrintLine(L"  --hotkey Ctrl+Alt+O       Toggle the Outlook main window");
+    PrintLine(L"  --start-hidden            Start Outlook in the background after each cold start");
+    PrintLine(L"  --status                  Show whether the app is running");
+    PrintLine(L"  --exit                    Stop the running instance");
+    PrintLine(L"  --version                 Show version");
+    PrintLine(L"  --help                    Show this help");
 }
 
 bool IsArg(const std::wstring& arg, const wchar_t* longName, const wchar_t* shortName = NULL) {

@@ -4,7 +4,9 @@ Keeps Outlook running in the background when the main window is closed, similar 
 
 Supports the new Outlook client (`olk.exe`) and basic main-window handling for classic Outlook (`outlook.exe`).
 
-Maintained fork by [leoking670](https://github.com/leoking670). Original project by [Oliver Dalton / Palsternakka](https://github.com/Palsternakka/OutlookWindowHook).
+Maintained fork by [leoking670](https://github.com/leoking670), developed with assistance from OpenAI Codex. Original project by [Oliver Dalton / Palsternakka](https://github.com/Palsternakka/OutlookWindowHook).
+
+Traditional Chinese documentation for Taiwan users: [README.zh-TW.md](README.zh-TW.md)
 
 ## Download
 
@@ -17,6 +19,12 @@ Download the x64 binary zip from the [Releases page](https://github.com/leoking6
 - Optional command-line control for background/no-tray usage
 - Optional global hotkey to show or hide the Outlook main window
 - Optional hidden cold-start mode
+
+## Classic Outlook Notes
+
+For classic Outlook, enable Outlook's own **Minimize to tray** setting first. This tool minimizes the classic Outlook main window instead of fully hiding it, so that Outlook can continue to behave like a background tray app.
+
+While this tool is running, closing the classic Outlook main window is intercepted and turned into minimize-to-tray behavior. To truly exit classic Outlook, use Outlook's own **Exit** command from its tray icon or terminate the `outlook.exe` process.
 
 ## Command Line
 

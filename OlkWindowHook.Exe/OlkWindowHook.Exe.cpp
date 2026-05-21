@@ -68,6 +68,12 @@ enum class OneShotCommand {
     Help
 };
 
+enum class OutlookKind {
+    None,
+    NewOutlook,
+    ClassicOutlook
+};
+
 struct CommandOptions {
     bool trayEnabled = true;
     bool startHidden = false;
@@ -94,12 +100,15 @@ std::unordered_set<DWORD> hookedThreads;
 std::unordered_set<HWND> trackedWindows;
 std::unordered_map<DWORD, HWND> trackedWindowByProcess;
 std::unordered_map<HWND, DWORD> trackedThreadByWindow;
+std::unordered_map<HWND, OutlookKind> trackedWindowKind;
+HWND lastActiveOutlookWindow = NULL;
 UINT cleanupMessage = 0;
 UINT controlMessage = 0;
 bool trayEnabled = true;
 bool trayIconAdded = false;
 bool startHidden = false;
-bool hideOnColdStartArmed = false;
+bool newOutlookColdStartArmed = false;
+bool classicOutlookColdStartArmed = false;
 bool hotkeyRegistered = false;
 UINT hotkeyModifiers = 0;
 UINT hotkeyVirtualKey = 0;
@@ -109,7 +118,7 @@ BOOL CALLBACK EnumWindowsProc(HWND window, LPARAM lParam);
 void ToggleOutlookWindow();
 bool RegisterToggleHotkey(HWND window);
 void UnregisterToggleHotkey(HWND window);
-bool IsAnyOutlookProcessRunning();
+bool IsOutlookProcessRunning(OutlookKind kind);
 void UpdateColdStartArmedState();
 
 void PrintLine(const wchar_t* message) {
@@ -297,16 +306,17 @@ int RequestRunningInstanceExit() {
 
 int RunOneShotCommand(const CommandOptions& options) {
     if (options.parseExitCode != 0) {
+        fwprintf(stderr, L"ERROR: ");
         if (!options.invalidArg.empty()) {
-            fwprintf(stderr, L"Unknown option: %s\n\n", options.invalidArg.c_str());
+            fwprintf(stderr, L"Unknown option: %s\n", options.invalidArg.c_str());
         }
         else if (!options.parseError.empty()) {
-            fwprintf(stderr, L"%s\n\n", options.parseError.c_str());
+            fwprintf(stderr, L"%s\n", options.parseError.c_str());
         }
         else {
-            fwprintf(stderr, L"Only one command option can be used at a time.\n\n");
+            fwprintf(stderr, L"Only one command option can be used at a time.\n");
         }
-        PrintHelp();
+        fwprintf(stderr, L"Run \"OlkWindowHook.exe --help\" for usage.\n\n");
         return options.parseExitCode;
     }
 
@@ -515,12 +525,23 @@ std::wstring GetProcessName(DWORD processId) {
     return processName;
 }
 
-bool IsOutlookProcessName(const std::wstring& processName) {
-    return _wcsicmp(processName.c_str(), NEW_OUTLOOK_PROCESS_NAME) == 0 ||
-        _wcsicmp(processName.c_str(), CLASSIC_OUTLOOK_PROCESS_NAME) == 0;
+const wchar_t* GetProcessNameForOutlookKind(OutlookKind kind) {
+    switch (kind) {
+    case OutlookKind::NewOutlook:
+        return NEW_OUTLOOK_PROCESS_NAME;
+    case OutlookKind::ClassicOutlook:
+        return CLASSIC_OUTLOOK_PROCESS_NAME;
+    default:
+        return L"";
+    }
 }
 
-bool IsAnyOutlookProcessRunning() {
+bool IsOutlookProcessRunning(OutlookKind kind) {
+    const wchar_t* targetProcessName = GetProcessNameForOutlookKind(kind);
+    if (!targetProcessName[0]) {
+        return false;
+    }
+
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot == INVALID_HANDLE_VALUE) {
         return true;
@@ -531,7 +552,7 @@ bool IsAnyOutlookProcessRunning() {
     bool running = false;
     if (Process32First(snapshot, &entry)) {
         do {
-            if (IsOutlookProcessName(entry.szExeFile)) {
+            if (_wcsicmp(entry.szExeFile, targetProcessName) == 0) {
                 running = true;
                 break;
             }
@@ -543,8 +564,16 @@ bool IsAnyOutlookProcessRunning() {
 }
 
 void UpdateColdStartArmedState() {
-    if (startHidden && !hideOnColdStartArmed && !IsAnyOutlookProcessRunning()) {
-        hideOnColdStartArmed = true;
+    if (!startHidden) {
+        return;
+    }
+
+    if (!newOutlookColdStartArmed && !IsOutlookProcessRunning(OutlookKind::NewOutlook)) {
+        newOutlookColdStartArmed = true;
+    }
+
+    if (!classicOutlookColdStartArmed && !IsOutlookProcessRunning(OutlookKind::ClassicOutlook)) {
+        classicOutlookColdStartArmed = true;
     }
 }
 
@@ -566,6 +595,23 @@ bool IsWindowFromProcess(HWND window, const wchar_t* processName) {
     }
 
     return _wcsicmp(GetProcessName(processId).c_str(), processName) == 0;
+}
+
+OutlookKind GetOutlookWindowKindFromProcessId(DWORD processId) {
+    if (!processId) {
+        return OutlookKind::None;
+    }
+
+    std::wstring processName = GetProcessName(processId);
+    if (_wcsicmp(processName.c_str(), NEW_OUTLOOK_PROCESS_NAME) == 0) {
+        return OutlookKind::NewOutlook;
+    }
+
+    if (_wcsicmp(processName.c_str(), CLASSIC_OUTLOOK_PROCESS_NAME) == 0) {
+        return OutlookKind::ClassicOutlook;
+    }
+
+    return OutlookKind::None;
 }
 
 bool IsNewOutlookHostWindow(HWND window) {
@@ -594,22 +640,20 @@ bool IsClassicOutlookMainWindow(HWND window) {
         _wcsicmp(GetWindowClass(window).c_str(), CLASSIC_OUTLOOK_MAIN_WINDOW_CLASS) == 0;
 }
 
-bool IsTargetOutlookWindow(HWND window) {
-    return IsNewOutlookHostWindow(window) || IsClassicOutlookMainWindow(window);
-}
-
-bool IsClassicOutlookWindow(HWND window) {
-    DWORD processId = 0;
-    GetWindowThreadProcessId(window, &processId);
-    if (!processId) {
-        return false;
+OutlookKind GetOutlookWindowKind(HWND window) {
+    if (IsNewOutlookHostWindow(window)) {
+        return OutlookKind::NewOutlook;
     }
 
-    return _wcsicmp(GetProcessName(processId).c_str(), CLASSIC_OUTLOOK_PROCESS_NAME) == 0;
+    if (IsClassicOutlookMainWindow(window)) {
+        return OutlookKind::ClassicOutlook;
+    }
+
+    return OutlookKind::None;
 }
 
-void HideOrMinimizeOutlookWindow(HWND window) {
-    if (IsClassicOutlookWindow(window)) {
+void HideOrMinimizeOutlookWindow(HWND window, OutlookKind kind) {
+    if (kind == OutlookKind::ClassicOutlook) {
         ShowWindow(window, SW_MINIMIZE);
     }
     else {
@@ -618,22 +662,25 @@ void HideOrMinimizeOutlookWindow(HWND window) {
 }
 
 void HideColdStartWindow(HWND window) {
-    if (!hideOnColdStartArmed || !IsWindowVisible(window) || IsIconic(window)) {
+    OutlookKind kind = GetOutlookWindowKind(window);
+    bool* armed = NULL;
+    if (kind == OutlookKind::NewOutlook) {
+        armed = &newOutlookColdStartArmed;
+    }
+    else if (kind == OutlookKind::ClassicOutlook) {
+        armed = &classicOutlookColdStartArmed;
+    }
+
+    if (!armed || !*armed || !IsWindowVisible(window) || IsIconic(window)) {
         return;
     }
 
-    if (IsNewOutlookHostWindow(window)) {
-        ShowWindowAsync(window, SW_HIDE);
-        hideOnColdStartArmed = false;
-    }
-    else if (IsClassicOutlookMainWindow(window)) {
-        ShowWindow(window, SW_MINIMIZE);
-        hideOnColdStartArmed = false;
-    }
+    HideOrMinimizeOutlookWindow(window, kind);
+    *armed = false;
 }
 
 void HideColdStartWindowAfterWebViewReady(HWND window) {
-    if (!hideOnColdStartArmed) {
+    if (!newOutlookColdStartArmed) {
         return;
     }
 
@@ -644,7 +691,8 @@ void HideColdStartWindowAfterWebViewReady(HWND window) {
 }
 
 bool TrackOutlookWindow(HWND window) {
-    if (!SetHookForThread || !IsTargetOutlookWindow(window)) {
+    OutlookKind kind = GetOutlookWindowKind(window);
+    if (!SetHookForThread || kind == OutlookKind::None) {
         return false;
     }
 
@@ -652,7 +700,7 @@ bool TrackOutlookWindow(HWND window) {
         return true;
     }
 
-    HANDLE closeAction = IsClassicOutlookWindow(window) ? TARGET_ACTION_MINIMIZE : TARGET_ACTION_HIDE;
+    HANDLE closeAction = kind == OutlookKind::ClassicOutlook ? TARGET_ACTION_MINIMIZE : TARGET_ACTION_HIDE;
     if (!SetProp(window, TARGET_WINDOW_PROP, closeAction)) {
         return false;
     }
@@ -688,13 +736,65 @@ bool TrackOutlookWindow(HWND window) {
     trackedWindows.insert(window);
     trackedWindowByProcess[processId] = window;
     trackedThreadByWindow[window] = threadId;
+    trackedWindowKind[window] = kind;
+    lastActiveOutlookWindow = window;
 
     return true;
 }
 
-HWND FindTrackedOutlookWindow() {
+OutlookKind GetTrackedWindowKind(HWND window) {
+    auto trackedKind = trackedWindowKind.find(window);
+    return trackedKind == trackedWindowKind.end() ? GetOutlookWindowKind(window) : trackedKind->second;
+}
+
+HWND FindTrackedRootFromWindow(HWND window) {
+    HWND rootWindow = GetAncestor(window, GA_ROOT);
+    if (rootWindow && trackedWindows.find(rootWindow) != trackedWindows.end() && IsWindow(rootWindow)) {
+        return rootWindow;
+    }
+
+    return NULL;
+}
+
+HWND FindTrackedWindowByKind(OutlookKind kind) {
+    if (kind == OutlookKind::None) {
+        return NULL;
+    }
+
+    for (const auto& trackedKind : trackedWindowKind) {
+        if (trackedKind.second == kind && IsWindow(trackedKind.first)) {
+            return trackedKind.first;
+        }
+    }
+
+    return NULL;
+}
+
+HWND FindTrackedWindowFromForeground(HWND foregroundWindow) {
+    HWND foregroundOutlookWindow = FindTrackedRootFromWindow(foregroundWindow);
+    if (foregroundOutlookWindow) {
+        return foregroundOutlookWindow;
+    }
+
+    DWORD processId = 0;
+    GetWindowThreadProcessId(foregroundWindow, &processId);
+    return FindTrackedWindowByKind(GetOutlookWindowKindFromProcessId(processId));
+}
+
+HWND FindHotkeyTargetWindow() {
+    HWND foregroundWindow = GetForegroundWindow();
+    HWND foregroundOutlookWindow = FindTrackedWindowFromForeground(foregroundWindow);
+    if (foregroundOutlookWindow) {
+        return foregroundOutlookWindow;
+    }
+
+    if (lastActiveOutlookWindow && IsWindow(lastActiveOutlookWindow)) {
+        return lastActiveOutlookWindow;
+    }
+
     for (HWND window : trackedWindows) {
         if (IsWindow(window)) {
+            lastActiveOutlookWindow = window;
             return window;
         }
     }
@@ -705,18 +805,21 @@ HWND FindTrackedOutlookWindow() {
 void ToggleOutlookWindow() {
     EnumWindows(EnumWindowsProc, 0);
 
-    HWND outlookWindow = FindTrackedOutlookWindow();
+    HWND outlookWindow = FindHotkeyTargetWindow();
     if (!outlookWindow) {
         return;
     }
 
+    OutlookKind kind = GetTrackedWindowKind(outlookWindow);
     if (IsWindowVisible(outlookWindow) && !IsIconic(outlookWindow)) {
-        HideOrMinimizeOutlookWindow(outlookWindow);
+        HideOrMinimizeOutlookWindow(outlookWindow, kind);
     }
     else {
         ShowWindow(outlookWindow, SW_RESTORE);
         SetForegroundWindow(outlookWindow);
     }
+
+    lastActiveOutlookWindow = outlookWindow;
 }
 
 bool RegisterToggleHotkey(HWND window) {
@@ -759,6 +862,11 @@ void RemoveTrackedWindow(HWND window) {
             trackedWindowByProcess.erase(it);
             break;
         }
+    }
+
+    trackedWindowKind.erase(window);
+    if (lastActiveOutlookWindow == window) {
+        lastActiveOutlookWindow = NULL;
     }
 
     UpdateColdStartArmedState();
@@ -851,7 +959,9 @@ void CleanupOutlookHooks() {
     }
     trackedWindowByProcess.clear();
     trackedThreadByWindow.clear();
+    trackedWindowKind.clear();
     hookedThreads.clear();
+    lastActiveOutlookWindow = NULL;
 
     if (RemoveHook) {
         RemoveHook();
@@ -883,7 +993,8 @@ int wmain(int argc, wchar_t* argv[]) {
 
     trayEnabled = options.trayEnabled;
     startHidden = options.startHidden;
-    hideOnColdStartArmed = startHidden && !IsAnyOutlookProcessRunning();
+    newOutlookColdStartArmed = startHidden && !IsOutlookProcessRunning(OutlookKind::NewOutlook);
+    classicOutlookColdStartArmed = startHidden && !IsOutlookProcessRunning(OutlookKind::ClassicOutlook);
     hotkeyModifiers = options.hotkeyModifiers;
     hotkeyVirtualKey = options.hotkeyVirtualKey;
     hotkeyText = options.hotkeyText;

@@ -70,7 +70,7 @@ enum class OneShotCommand {
 
 struct CommandOptions {
     bool trayEnabled = true;
-    bool hideOnFirstOpen = false;
+    bool startHidden = false;
     bool hotkeyEnabled = false;
     UINT hotkeyModifiers = 0;
     UINT hotkeyVirtualKey = 0;
@@ -99,7 +99,7 @@ UINT cleanupMessage = 0;
 UINT controlMessage = 0;
 bool trayEnabled = true;
 bool trayIconAdded = false;
-bool hideOnFirstOpen = false;
+bool startHidden = false;
 bool hideOnColdStartArmed = false;
 bool hotkeyRegistered = false;
 UINT hotkeyModifiers = 0;
@@ -125,8 +125,8 @@ void PrintHelp() {
     PrintLine(L"  OlkWindowHook.exe --no-tray    Start in background without tray icon");
     PrintLine(L"  OlkWindowHook.exe --hotkey Ctrl+Alt+O");
     PrintLine(L"                                 Toggle the Outlook main window");
-    PrintLine(L"  OlkWindowHook.exe --hide-on-first-open");
-    PrintLine(L"                                 Hide the first Outlook main window opened after each cold start");
+    PrintLine(L"  OlkWindowHook.exe --start-hidden");
+    PrintLine(L"                                 Start Outlook in the background after each cold start");
     PrintLine(L"  OlkWindowHook.exe --status     Show whether the app is running");
     PrintLine(L"  OlkWindowHook.exe --exit       Stop the running instance");
     PrintLine(L"  OlkWindowHook.exe --version    Show version");
@@ -217,8 +217,8 @@ CommandOptions ParseCommandLine(int argc, wchar_t* argv[]) {
         if (IsArg(arg, L"--no-tray")) {
             options.trayEnabled = false;
         }
-        else if (IsArg(arg, L"--hide-on-first-open")) {
-            options.hideOnFirstOpen = true;
+        else if (IsArg(arg, L"--start-hidden")) {
+            options.startHidden = true;
         }
         else if (IsArg(arg, L"--hotkey")) {
             if (i + 1 >= argc) {
@@ -542,7 +542,7 @@ bool IsAnyOutlookProcessRunning() {
 }
 
 void UpdateColdStartArmedState() {
-    if (hideOnFirstOpen && !hideOnColdStartArmed && !IsAnyOutlookProcessRunning()) {
+    if (startHidden && !hideOnColdStartArmed && !IsAnyOutlookProcessRunning()) {
         hideOnColdStartArmed = true;
     }
 }
@@ -889,8 +889,8 @@ int wmain(int argc, wchar_t* argv[]) {
     }
 
     trayEnabled = options.trayEnabled;
-    hideOnFirstOpen = options.hideOnFirstOpen;
-    hideOnColdStartArmed = hideOnFirstOpen && !IsAnyOutlookProcessRunning();
+    startHidden = options.startHidden;
+    hideOnColdStartArmed = startHidden && !IsAnyOutlookProcessRunning();
     hotkeyModifiers = options.hotkeyModifiers;
     hotkeyVirtualKey = options.hotkeyVirtualKey;
     hotkeyText = options.hotkeyText;
@@ -935,7 +935,7 @@ int wmain(int argc, wchar_t* argv[]) {
     if (trayEnabled) {
         CreateTrayIconMenu();
     }
-    if (hideOnFirstOpen) {
+    if (startHidden) {
         SetTimer(hwnd, COLD_START_TIMER_ID, COLD_START_CHECK_MS, NULL);
     }
     InitializeOutlookHooks();

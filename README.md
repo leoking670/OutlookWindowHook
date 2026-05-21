@@ -16,7 +16,7 @@ Download the x64 binary zip from the [Releases page](https://github.com/leoking6
 - No need for admin privileges
 - Optional command-line control for background/no-tray usage
 - Optional global hotkey to show or hide the Outlook main window
-- Optional first-open background mode
+- Optional hidden cold-start mode
 
 ## Command line
 
@@ -25,15 +25,15 @@ OlkWindowHook.exe              # Start with tray icon
 OlkWindowHook.exe --no-tray    # Start in background without tray icon
 OlkWindowHook.exe --hotkey Ctrl+Alt+O
                               # Toggle the Outlook main window with a global hotkey
-OlkWindowHook.exe --hide-on-first-open
-                              # Hide the first Outlook main window opened after each cold start
+OlkWindowHook.exe --start-hidden
+                              # Start Outlook in the background after each cold start
 OlkWindowHook.exe --status     # Print whether the app is running
 OlkWindowHook.exe --exit       # Stop the running instance
 OlkWindowHook.exe --version    # Print version
 OlkWindowHook.exe --help       # Print usage
 ```
 
-`--hotkey` supports `Ctrl`, `Alt`, `Shift`, and `Win` modifiers with one `A-Z`, `0-9`, or `F1-F24` key. The hotkey and cold-start hiding options are only enabled when explicitly passed on the command line.
+`--hotkey` supports `Ctrl`, `Alt`, `Shift`, and `Win` modifiers with one `A-Z`, `0-9`, or `F1-F24` key. The hotkey and hidden cold-start options are only enabled when explicitly passed on the command line.
 
 ## How it works
 

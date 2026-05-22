@@ -12,6 +12,8 @@ Maintained fork by [leoking670](https://github.com/leoking670), developed with a
 
 Download the x64 binary zip from the [Releases page](https://github.com/leoking670/OutlookWindowHook/releases). Extract it and keep `OlkWindowHook.dll` in the same directory as `OlkWindowHook.exe`.
 
+If Windows reports a missing `VCRUNTIME140.dll`, install the Microsoft Visual C++ Redistributable 2015-2022 x64 first.
+
 ## What It Does
 
 - Keeps Outlook running when the main window is closed
@@ -19,7 +21,6 @@ Download the x64 binary zip from the [Releases page](https://github.com/leoking6
 - Can run with or without a tray icon
 - Can register a global hotkey to show or hide Outlook
 - Can start Outlook in the background after each cold start
-- Does not require administrator privileges
 
 ## Command Line
 
@@ -54,9 +55,9 @@ Common examples:
 
 ## Startup Options
 
-⚠️**Important:** the tray menu's **Autostart** only starts `OlkWindowHook.exe` with no command-line options. It will not remember `--no-tray`, `--hotkey`, or `--start-hidden`.
+**Important:** the tray menu's **Autostart** only starts `OlkWindowHook.exe` with no command-line options. It will not remember `--no-tray`, `--hotkey`, or `--start-hidden`.
 
-If you configure startup with custom options, first right click the tray icon and untick **Autostart**. Otherwise Windows may start a second, basic no-argument copy and it can look like your options are not working.
+If you configure startup with custom options, first right click the tray icon and untick **Autostart**. Otherwise Windows may start a basic no-argument copy and it can look like your options are not working.
 
 Use one of the setup paths below.
 
@@ -123,9 +124,10 @@ You can also use a startup order manager such as Startup Delayer: start Outlook 
 
 ## Classic Outlook Notes
 
-For classic Outlook, enable Outlook's own **Minimize to tray** setting first. This tool minimizes the classic Outlook main window instead of fully hiding it, so Outlook can continue to behave like a background tray app.
+For classic Outlook:
 
-While this tool is running, closing the classic Outlook main window is turned into minimize-to-tray behavior. To truly exit classic Outlook, use Outlook's own **Exit** command from its tray icon or terminate the `outlook.exe` process.
+1. Enable Outlook's own **Minimize to tray** setting.
+2. To fully quit Outlook while this tool is running, use Outlook's tray icon **Exit** command, or terminate `outlook.exe`.
 
 ## How It Works
 
@@ -138,7 +140,7 @@ While this tool is running, closing the classic Outlook main window is turned in
 
 ## Building
 
-Build `Release|x64` with Visual Studio 2022 or MSBuild. Releases are distributed as a zip containing `OlkWindowHook.exe`, `OlkWindowHook.dll`, `LICENSE`, and README files; MSI installer builds are no longer provided.
+Build `Release|x64` with Visual Studio 2022 or MSBuild. Releases are distributed as a zip containing `OlkWindowHook.exe`, `OlkWindowHook.dll`, `LICENSE`, and README files.
 
 ## Licence
 

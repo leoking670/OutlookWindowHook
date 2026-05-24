@@ -57,7 +57,7 @@ Common examples:
 
 **Important:** the tray menu's **Autostart** only starts `OlkWindowHook.exe` with no command-line options. It will not remember `--no-tray`, `--hotkey`, or `--start-hidden`.
 
-If you configure startup with custom options, first right click the tray icon and untick **Autostart**. Otherwise Windows may start a basic no-argument copy and it can look like your options are not working.
+If you configure startup with custom options, first right click the tray icon and untick **Autostart**. Otherwise the no-argument Autostart launch may take effect instead, and it can look like your options are not working.
 
 Use one of the setup paths below.
 
@@ -127,7 +127,7 @@ You can also use a startup order manager such as Startup Delayer: start Outlook 
 For classic Outlook:
 
 1. Enable Outlook's own **Minimize to tray** setting.
-2. To fully quit Outlook while this tool is running, use Outlook's tray icon **Exit** command, or terminate `outlook.exe`.
+2. To fully quit Outlook while this tool is running, use Outlook's **File > Exit** command, or terminate `outlook.exe`.
 
 ## How It Works
 

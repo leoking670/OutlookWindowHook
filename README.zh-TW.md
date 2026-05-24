@@ -51,13 +51,13 @@
 .\OlkWindowHook.exe --no-tray --start-hidden --hotkey Ctrl+Alt+O
 ```
 
-`--no-tray` 只是不顯示系統匣圖示。如果你直接在 PowerShell 或 Windows Terminal 中執行長駐模式，該終端機可能會一直被占用。日常使用建議透過捷徑或腳本啟動。
+`--no-tray` 只是不顯示系統匣圖示。如果你直接在 PowerShell 或 Windows Terminal 中執行長駐模式，該終端機可能會一直被占用。日常使用建議透過捷徑或指令碼啟動。
 
 ## 開機啟動方式
 
 **重要：** 系統匣選單中的 **Autostart** 只會啟動不帶參數的 `OlkWindowHook.exe`。它不會記住 `--no-tray`、`--hotkey` 或 `--start-hidden`。
 
-如果你要設定帶參數的開機啟動，請先在系統匣圖示上按右鍵，取消勾選 **Autostart**。否則 Windows 可能會另外啟動一個無參數的基本版本，看起來就像你的參數沒有生效。
+如果你要設定帶參數的開機啟動，請先在系統匣圖示上按右鍵，取消勾選 **Autostart**。否則不帶參數的 Autostart 啟動可能會先套用，看起來就像你的參數沒有生效。
 
 請使用下面任一方式設定。
 
@@ -89,7 +89,7 @@ explorer shell:startup
 7. 把捷徑移到這個啟動資料夾。
 8. 登出再登入，或先雙擊捷徑測試一次。
 
-### 方式二：PowerShell 啟動腳本
+### 方式二：PowerShell 啟動指令碼
 
 如果你希望本工具先啟動，Outlook 幾秒後再啟動，請使用這種方式。
 
@@ -127,7 +127,7 @@ powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Path\To\Sta
 若使用 Classic Outlook：
 
 1. 請先在 Outlook 自身設定中啟用 **最小化到系統匣**。
-2. 本工具執行期間若要完整結束 Outlook，請使用 Outlook 系統匣圖示中的 **Exit**，或手動結束 `outlook.exe` 行程。
+2. 本工具執行期間若要完整結束 Outlook，請在 Outlook 主程式中選擇 **檔案 > 結束**，或手動結束 `outlook.exe` 行程。
 
 ## 工作原理
 

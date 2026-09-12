@@ -29,7 +29,7 @@
 
 constexpr wchar_t TARGET_WINDOW_PROP[] = L"OlkWindowHook.TargetWindow";
 const HANDLE TARGET_ACTION_HIDE = reinterpret_cast<HANDLE>(1);
-const HANDLE TARGET_ACTION_MINIMIZE = reinterpret_cast<HANDLE>(2);
+const HANDLE TARGET_ACTION_MINIMIZE_TO_TRAY = reinterpret_cast<HANDLE>(2);
 constexpr wchar_t CLEANUP_MESSAGE_NAME[] = L"OlkWindowHook.CleanupSubclass";
 
 HINSTANCE hInstance;
@@ -52,8 +52,11 @@ BOOL IsTargetWindow(HWND hwnd) {
 }
 
 void HideOrMinimizeTargetWindow(HWND hwnd) {
-    if (GetProp(hwnd, TARGET_WINDOW_PROP) == TARGET_ACTION_MINIMIZE) {
+    if (GetProp(hwnd, TARGET_WINDOW_PROP) == TARGET_ACTION_MINIMIZE_TO_TRAY) {
+        // Classic Outlook serves its tray icon from the minimized state, so
+        // minimize to secure it, then hide to drop the taskbar button.
         ShowWindow(hwnd, SW_MINIMIZE);
+        ShowWindow(hwnd, SW_HIDE);
     }
     else {
         ShowWindow(hwnd, SW_HIDE);

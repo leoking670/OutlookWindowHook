@@ -126,7 +126,7 @@ powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Path\To\Sta
 
 若使用 Classic Outlook：
 
-1. 請先在 Outlook 自身設定中啟用 **最小化到系統匣**。
+1. 在系統匣圖示上按左鍵雙擊，或用右鍵選單的 **開啟**，即可喚回 Outlook。
 2. 本工具執行期間若要完整結束 Outlook，請在 Outlook 主程式中選擇 **檔案 > 結束**，或手動結束 `outlook.exe` 行程。
 
 ## 工作原理
@@ -134,8 +134,8 @@ powershell.exe -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Path\To\Sta
 1. 使用 WinEvent 通知尋找由 `olk.exe` 或 `outlook.exe` 建立的受支援 Outlook 主視窗
 2. 分別追蹤新版 Outlook 和 Classic Outlook，包含各自獨立的冷啟動狀態
 3. 僅針對被追蹤 Outlook 視窗所在的 thread 安裝 `WH_CALLWNDPROC` hook
-4. 攔截 `WM_CLOSE`：新版 Outlook 會被隱藏，Classic Outlook 會被最小化
-5. 使用 `--start-hidden` 時，新版 Outlook 會在 WebView 子視窗準備好後隱藏；Classic Outlook 則在主視窗出現時最小化
+4. 攔截 `WM_CLOSE`：新版 Outlook 會被隱藏，Classic Outlook 則先最小化再隱藏
+5. 使用 `--start-hidden` 時，新版 Outlook 會在 WebView 子視窗準備好後隱藏；Classic Outlook 則在主視窗出現時先最小化再隱藏
 6. 若設定熱鍵，會優先控制目前前景中的 Outlook 類型，否則控制最近追蹤到的 Outlook 主視窗
 
 ## 建置

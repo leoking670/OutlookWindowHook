@@ -46,7 +46,7 @@ constexpr wchar_t CLASSIC_OUTLOOK_PROCESS_NAME[] = L"outlook.exe";
 constexpr wchar_t CLASSIC_OUTLOOK_MAIN_WINDOW_CLASS[] = L"rctrl_renwnd32";
 constexpr wchar_t TARGET_WINDOW_PROP[] = L"OlkWindowHook.TargetWindow";
 const HANDLE TARGET_ACTION_HIDE = reinterpret_cast<HANDLE>(1);
-const HANDLE TARGET_ACTION_MINIMIZE = reinterpret_cast<HANDLE>(2);
+const HANDLE TARGET_ACTION_MINIMIZE_TO_TRAY = reinterpret_cast<HANDLE>(2);
 constexpr wchar_t CLEANUP_MESSAGE_NAME[] = L"OlkWindowHook.CleanupSubclass";
 constexpr wchar_t CONTROL_MESSAGE_NAME[] = L"OlkWindowHook.Control";
 constexpr wchar_t WINDOW_CLASS_NAME[] = L"OlkWindowHookClass";
@@ -635,9 +635,15 @@ bool IsNewOutlookWebViewWindow(HWND window, HWND& hostWindow) {
 }
 
 bool IsClassicOutlookMainWindow(HWND window) {
-    return IsRootUnownedWindow(window) &&
-        IsWindowFromProcess(window, CLASSIC_OUTLOOK_PROCESS_NAME) &&
-        _wcsicmp(GetWindowClass(window).c_str(), CLASSIC_OUTLOOK_MAIN_WINDOW_CLASS) == 0;
+    if (!IsRootUnownedWindow(window) ||
+        !IsWindowFromProcess(window, CLASSIC_OUTLOOK_PROCESS_NAME) ||
+        _wcsicmp(GetWindowClass(window).c_str(), CLASSIC_OUTLOOK_MAIN_WINDOW_CLASS) != 0) {
+        return false;
+    }
+
+    // Size separates the real main window from the helper windows sharing its
+    // class; IsIconic covers it once minimized off screen.
+    return HasRealSize(window) || IsIconic(window);
 }
 
 OutlookKind GetOutlookWindowKind(HWND window) {
@@ -652,9 +658,16 @@ OutlookKind GetOutlookWindowKind(HWND window) {
     return OutlookKind::None;
 }
 
+// Classic Outlook serves its notification-area icon from the minimized state,
+// so minimize to secure the tray entry, then hide to drop the taskbar button.
+void HideAndMinimizeClassicOutlookWindow(HWND window) {
+    ShowWindow(window, SW_MINIMIZE);
+    ShowWindow(window, SW_HIDE);
+}
+
 void HideOrMinimizeOutlookWindow(HWND window, OutlookKind kind) {
     if (kind == OutlookKind::ClassicOutlook) {
-        ShowWindow(window, SW_MINIMIZE);
+        HideAndMinimizeClassicOutlookWindow(window);
     }
     else {
         ShowWindowAsync(window, SW_HIDE);
@@ -700,7 +713,7 @@ bool TrackOutlookWindow(HWND window) {
         return true;
     }
 
-    HANDLE closeAction = kind == OutlookKind::ClassicOutlook ? TARGET_ACTION_MINIMIZE : TARGET_ACTION_HIDE;
+    HANDLE closeAction = kind == OutlookKind::ClassicOutlook ? TARGET_ACTION_MINIMIZE_TO_TRAY : TARGET_ACTION_HIDE;
     if (!SetProp(window, TARGET_WINDOW_PROP, closeAction)) {
         return false;
     }

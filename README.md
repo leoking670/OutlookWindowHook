@@ -126,7 +126,7 @@ You can also use a startup order manager such as Startup Delayer: start Outlook 
 
 For classic Outlook:
 
-1. Enable Outlook's own **Minimize to tray** setting.
+1. Bring Outlook back with a double-click on the notification-area icon, or its right-click **Open** item.
 2. To fully quit Outlook while this tool is running, use Outlook's **File > Exit** command, or terminate `outlook.exe`.
 
 ## How It Works
@@ -134,8 +134,8 @@ For classic Outlook:
 1. Uses WinEvent notifications to find supported Outlook main windows from `olk.exe` and `outlook.exe`
 2. Tracks new Outlook and classic Outlook separately, including separate cold-start state
 3. Installs a `WH_CALLWNDPROC` hook only on the Outlook window thread being tracked
-4. Intercepts `WM_CLOSE`: new Outlook is hidden, classic Outlook is minimized
-5. For `--start-hidden`, new Outlook is hidden after its WebView child is ready; classic Outlook is minimized when its main window appears
+4. Intercepts `WM_CLOSE`: new Outlook is hidden, classic Outlook is minimized then hidden
+5. For `--start-hidden`, new Outlook is hidden after its WebView child is ready; classic Outlook is minimized and hidden when its main window appears
 6. If a hotkey is configured, it controls the foreground Outlook type first, then falls back to the most recently tracked Outlook window
 
 ## Building
